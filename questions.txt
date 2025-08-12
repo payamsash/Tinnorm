@@ -1,0 +1,69 @@
+Q1: Do tinnitus patients show significant deviations from normative EEG patterns after accounting for age, sex, PTA, and site?
+
+Q2: Are deviations in specific EEG features (e.g., alpha power, connectivity) more common in tinnitus?
+
+Q3: Are larger deviations in certain EEG features associated with higher THI scores?
+
+Q4: Can deviation maps help explain why some tinnitus patients have severe distress and others don’t?
+
+Q5: Are there subgroups of tinnitus patients with different deviation profiles?
+For example: one subgroup with abnormal occipital alpha, another with abnormal frontal theta.
+
+Q6: After controlling for PTA in the normative model, do we still see significant deviations in tinnitus patients?
+
+Q7: Can deviation scores predict THI, PTA progression, or classification (tinnitus vs control) better than raw EEG features?
+
+
+
+What should be the EEG features?
+
+
+Spectral / Power features (essential)
+Absolute band power per channel/ROI for canonical bands (delta 1–4 Hz, theta 4–8, alpha 8–12, beta 12–30, low-gamma 30–45).
+Why: Robust, interpretable; many tinnitus studies report alpha/theta changes.
+Relative band power (band power / total power) per channel/ROI.
+Why: Controls for between-subject overall power differences.
+Log-transformed power (stabilizes variance).
+Peak Alpha Frequency (PAF) per subject (global or posterior ROI).
+Why: Sensitive to age and cognitive state; useful as a continuous covariate.
+Band ratios (e.g., theta/alpha, alpha/beta) per ROI.
+Why: Simple summary metrics that sometimes relate to pathology.
+
+
+Aperiodic / spectral shape
+1/f slope and offset (aperiodic component) from methods like FOOOF.
+Why: Separates oscillatory peaks from broadband changes—often biologically meaningful.
+
+
+
+Connectivity features
+Pairwise functional connectivity (per band) using robust measures:
+Imaginary coherence or debiased weighted phase-lag index (dwPLI) (less volume-conduction bias).
+Amplitude envelope correlation (AEC) for slower coupling.
+Why: Network alterations are common in tinnitus; choose measures that limit spurious zero-lag coupling.
+Graph/network summary metrics derived from connectivity matrices: node degree, strength, clustering coefficient, modularity, small-worldness (per band).
+Why: Compactly captures network topology and reduces dimensionality.
+
+
+
+
+3. Practical workflow for interpretability in your case
+Fit NM for each feature set separately (spectral, connectivity, microstates).
+Extract covariate effects from the model:
+Linear coefficients or kernel sensitivity (GP).
+Compute deviation scores for each subject.
+Rank features by:
+Mean |deviation| in tinnitus vs controls.
+Effect size (Cohen’s d) of deviations between groups.
+Map features:
+Top deviating ROIs → scalp/source map.
+Top deviating networks → connectivity graphs.
+Relate deviations to symptoms:
+Correlation/regression with THI, controlling for PTA.
+Visualize in scatterplots with confidence bands.
+4. Special bonus for EEG
+You can combine interpretability + visualization in a way that’s very intuitive:
+Show a normative curve (predicted mean ± 2 SD) for a feature vs age.
+Overlay tinnitus subjects and controls, highlighting who falls outside ±2 SD.
+This lets you say: “Alpha power in left auditory cortex is expected to be X at age 55, but this tinnitus patient is 3.2 SD below normal.”
+
