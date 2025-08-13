@@ -51,10 +51,10 @@ if __name__ == "__main__":
 
     main_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
     df = pd.read_csv("/Users/payamsadeghishabestari/Downloads/ant_to_tide (3).csv")
-    df = pd.read_csv("/Users/payamsadeghishabestari/Downloads/ant_to_tide (3).csv")
-    df.loc[len(df)] = [280, "dsno", 70053, "rest"]
-    df.loc[len(df)] = [281, "mkbb", 70054, "rest"]
-    df.loc[len(df)] = [282, "sgwy", 70055, "rest"]
+
+    # df.loc[len(df)] = [280, "dsno", 70053, "rest"]
+    # df.loc[len(df)] = [281, "mkbb", 70054, "rest"]
+    # df.loc[len(df)] = [282, "sgwy", 70055, "rest"]
 
     mappings = {
         "dublin": get_sorted_mapping(
@@ -67,6 +67,7 @@ if __name__ == "__main__":
             main_dir / "illinois",
             name_filter="ses-1_rest",
             key_length=5,
+            suffix_filter=".cdt",
             file_level="nested",
         ),
         "regensburg": get_sorted_mapping(
