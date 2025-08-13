@@ -5,7 +5,8 @@ __pycache__/
 
 # C extensions
 *.so
-
+.DS_Store
+questions.txt
 # Distribution / packaging
 .Python
 build/

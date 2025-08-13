@@ -28,9 +28,9 @@ for site in sites[3:4]:
     for subject_id, fname in mappings[site].items():
 
         fname_save_0 = main_dir / "orig" / f"{site}_{subject_id}.fif"
-        fname_save_1 = main_dir / "preproc1" / f"{site}_{subject_id}.fif"
-        fname_save_2 = main_dir / "preproc2" / f"{site}_{subject_id}.fif"
-        fname_save_3 = main_dir / "preproc3" / f"{site}_{subject_id}.fif"
+        fname_save_1 = main_dir / "preproc_1" / f"{site}_{subject_id}.fif"
+        fname_save_2 = main_dir / "preproc_2" / f"{site}_{subject_id}.fif"
+        fname_save_3 = main_dir / "preproc_3" / f"{site}_{subject_id}.fif"
         fname_save_4 = main_dir / "reports" / f"{site}_{subject_id}.html"
         for dir_name in [fname_save_0, fname_save_1, fname_save_2, fname_save_3, fname_save_4]:
             dir_name.parent.mkdir(exist_ok=True)
