@@ -67,3 +67,21 @@ Show a normative curve (predicted mean ± 2 SD) for a feature vs age.
 Overlay tinnitus subjects and controls, highlighting who falls outside ±2 SD.
 This lets you say: “Alpha power in left auditory cortex is expected to be X at age 55, but this tinnitus patient is 3.2 SD below normal.”
 
+
+
+
+
+
+
+Practical hybrid approach (best of both worlds)
+Compute features per epoch (you already did).
+Aggregate to subject using robust statistics: median as primary, plus MAD (or std) as an uncertainty/QC feature.
+Keep epoch-level features for later hierarchical modeling, reliability (ICC) and surrogate testing.
+Feed subject-level medians as the NM targets; include MAD, n_clean_epochs, and log_total_power (or SNR) as covariates or additional outputs to account for measurement noise.
+Concrete aggregation recipe (recommended)
+For each feature (e.g., log_abs_alpha_power in ROI1):
+feature_subject = median(epoch_feature_values) → target for NM
+feature_dispersion = MAD(epoch_feature_values) → optional covariate / uncertainty
+Also store: n_clean_epochs and % rejected_epochs.
+Use median + MAD (instead of mean + sd) because EEG epoch values often have outliers.
+

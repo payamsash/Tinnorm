@@ -8,6 +8,7 @@ from tqdm import tqdm
 from fooof import FOOOF
 from mne.time_frequency import psd_array_welch
 from mne_connectivity import spectral_connectivity_time
+from mne.filter import filter_data
 from tools.learn_graph import log_degree_barrier
 
 def compute_spectral_features(
@@ -15,6 +16,7 @@ def compute_spectral_features(
                                 subject_id,
                                 atlas,
                                 bands,
+                                saving_dir,
                                 fmin=1,
                                 fmax=45,
                                 method="welch",
@@ -23,7 +25,6 @@ def compute_spectral_features(
                                 n_per_seg=None,
                                 relative=False,
                                 eps=1e-12,
-                                saving_dir
                             ):
     
     data = np.load("...", allow_pickle=True)
@@ -81,14 +82,13 @@ def compute_connectivity_features(
                                     subject_id,
                                     atlas,
                                     bands,
-                                    methods,
-                                    saving_dir
+                                    saving_dir,
+                                    methods=["coh", "plv"]
                                     )
 
     data = np.load("....", allow_pickle=True)
-    n_labels = {"dk": 68, "sch7": 7, "sch17": 17}
-    n_label = n_labels[atlas]
-    tril_idx = np.tril_indices(n_label, k=-1)
+    n_epochs, n_labels, _ = data.shape
+    tril_idx = np.tril_indices(n_labels, k=-1)
 
     con_dict = {}
     for band, fminmax in bands.items():
@@ -105,7 +105,7 @@ def compute_connectivity_features(
                                     )
         for con, method in zip(cons, methods):
             con_data = con.get_data()[:, :, 0]
-            con_data_smaller = con_data[:, np.ravel_multi_index(tril_idx, (n_label, n_label))]
+            con_data_smaller = con_data[:, np.ravel_multi_index(tril_idx, (n_labels, n_labels))]
             fname_save = saving_dir / "connectivity" / method / f"{site}_{subject_id}_{atlas}_{band}.npy"
             np.save(fname_save, con_data_smaller)
 
@@ -121,7 +121,40 @@ def compute_graph_features(
                             )
 
 
+    data = np.load("..", allow_pickle=True)
+    n_epochs, n_label, _ = data.shape
+    data_reshaped = data.reshape(-1, data.shape[-1])
+    tril_idxs = np.tril_indices(68, k=-1)
 
+    for band, fminmax in bands.items():
+    
+        filtered_data = filter_data(
+                                    data_reshaped,
+                                    sfreq=250,
+                                    l_freq=8,
+                                    h_freq=15,
+                                    )
+        filtered_data = filtered_data.reshape(n_epochs, n_label, -1)
+        
+        cons = []
+        for ep in filtered_data:
+            graph = log_degree_barrier(
+                                        X=ep,
+                                        dist_type='sqeuclidean',
+                                        alpha=1,
+                                        beta=1,
+                                        step=0.5,
+                                        w0=None,
+                                        maxit=10000,
+                                        rtol=1e-16,
+                                        retall=False,
+                                        verbosity='LOW'
+                                        )
+            cons.append(graph[tril_idxs])
+        cons = np.array(cons)
+        
+        fname_save = ""
+        np.save("", cons)
 
 
 
@@ -138,7 +171,6 @@ if __name__ == "__main__":
             "beta_3": (21, 30),
             "gamma": (30, 40),
             }
-    methods = ["coh", "plv"]
 
     # compute_spectral_features()
     # compute_connectivity_features()
