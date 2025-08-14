@@ -107,7 +107,7 @@ for site in sites[3:4]:
 
         ## preproc 1
         raw.filter(1, 100)
-        raw.notch_filter(freqs=line_freqs[site], picks="eeg", notch_widths=1)
+        # raw.notch_filter(freqs=line_freqs[site], picks="eeg", notch_widths=1)
         raw.set_eeg_reference("average", projection=False)
         epochs = mne.make_fixed_length_epochs(raw, duration=10, preload=True)
         epochs.save(fname_save_1, overwrite=overwrite)
