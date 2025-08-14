@@ -1,85 +1,116 @@
 import numpy as np
 from mne.time_frequency import psd_array_welch
 from fooof import FOOOF
+from tqdm import tqdm
+from mne_connectivity import EpochSpectralConnectivity
 
-def compute_band_power_paf_fooof_fast(data, sfreq, bands):
+def compute_spectral_features(
+                                data,
+                                sfreq,
+                                bands,
+                                fmin=1,
+                                fmax=45,
+                                method="welch",
+                                n_fft=256,
+                                n_overlap=0,
+                                n_per_seg=None,
+                                relative=False,
+                                eps=1e-12
+                            ):
     """
-    Vectorized Welch PSD -> band power, PAF, and FOOOF aperiodic params.
+    Compute band power, PAF, and 1/f slope/intercept using FOOOF.
 
     Parameters
     ----------
-    data : np.ndarray
-        Shape = (n_epochs, n_labels, n_times)
+    data : ndarray, shape (epochs, labels, times)
+        EEG time series.
     sfreq : float
-        Sampling frequency.
+        Sampling frequency in Hz.
     bands : dict
-        Example: {"delta": (1, 4), "theta": (4, 8), "alpha": (8, 12), ...}
+        e.g. {"delta": (1, 4), "theta": (4, 8), ...}
+    fmin, fmax : float
+        Min and max freq for PSD.
+    relative : bool
+        Return relative power instead of absolute.
+    eps : float
+        Small constant to avoid log(0).
 
     Returns
     -------
-    dict
-        Keys: absolute, relative, paf, aperiodic_slope, aperiodic_intercept
+    features : dict of np.ndarray
+        Keys: band power per band, 'slope', 'intercept'
     """
+    
     n_epochs, n_labels, _ = data.shape
-    band_names = list(bands.keys())
+    n_bands = len(bands)
 
-    # --- Compute PSD for all epochs & labels at once ---
-    data_reshaped = data.reshape(-1, data.shape[-1])  # (epochs*labels, timepoints)
-    freqs, psd = psd_array_welch(
-        data_reshaped, sfreq=sfreq, fmin=1, fmax=45, n_fft=1024, average='mean'
+    # PSD
+    psd, freqs = psd_array_welch(
+        data.reshape(-1, data.shape[-1]),
+        sfreq=sfreq, fmin=fmin, fmax=fmax,
+        n_fft=n_fft, n_overlap=n_overlap, n_per_seg=n_per_seg,
+        average="mean"
     )
-    psd = psd.reshape(n_epochs, n_labels, len(freqs))
 
-    # --- Total power for relative band power ---
+    psd = psd.reshape(n_epochs, n_labels, -1)
     total_power = np.trapz(psd, freqs, axis=-1)
+    band_powers = {b: np.zeros((n_epochs, n_labels)) for b in bands}
+    slope = np.zeros((n_epochs, n_labels))
+    intercept = np.zeros((n_epochs, n_labels))
+    
+    for e in range(n_epochs):
+        for l in range(n_labels):
+            this_psd = psd[e, l]
 
-    # --- Absolute & relative power ---
-    abs_power = np.zeros((n_epochs, n_labels, len(bands)))
-    rel_power = np.zeros_like(abs_power)
+            # Compute band powers
+            for b, (lo, hi) in bands.items():
+                mask = (freqs >= lo) & (freqs <= hi)
+                bp = np.trapz(this_psd[mask], freqs[mask])
+                if relative:
+                    bp /= (total_power[e, l] + eps)
+                band_powers[b][e, l] = bp
 
-    for i, (bname, (fmin, fmax)) in enumerate(bands.items()):
-        idx = (freqs >= fmin) & (freqs <= fmax)
-        bp = np.trapz(psd[:, :, idx], freqs[idx], axis=-1)
-        abs_power[:, :, i] = bp
-        rel_power[:, :, i] = bp / total_power
+            fm = FOOOF(peak_width_limits=[0.5, 12], verbose=False)
+            fm.fit(freqs, this_psd, [fmin, fmax])
 
-    # --- Peak Alpha Frequency (PAF) ---
-    alpha_min, alpha_max = bands.get("alpha", (8, 12))
-    idx_alpha = (freqs >= alpha_min) & (freqs <= alpha_max)
-    paf = freqs[idx_alpha][np.argmax(psd[:, :, idx_alpha], axis=-1)]
+            # 1/f slope & intercept
+            ap = fm.get_params('aperiodic_params')
+            intercept[e, l] = ap[0]
+            slope[e, l] = ap[1]
 
-    # --- FOOOF aperiodic params ---
-    slopes = np.zeros((n_epochs, n_labels))
-    intercepts = np.zeros((n_epochs, n_labels))
-    fm = FOOOF(peak_width_limits=[1, 8], max_n_peaks=6, min_peak_height=0.1)
+    features = {f"{b}_power": band_powers[b] for b in bands}
+    features["slope"] = slope
+    features["intercept"] = intercept
 
-    for ep in range(n_epochs):
-        for lbl in range(n_labels):
-            fm.fit(freqs, psd[ep, lbl, :], [1, 40])
-            intercepts[ep, lbl] = fm.aperiodic_params_[0]
-            slopes[ep, lbl] = fm.aperiodic_params_[1]
+    for b in bands:
+        features[f"{b}_power"] = np.log10(features[f"{b}_power"] + eps)
 
-    return {
-        "absolute": abs_power,               # (epochs, labels, n_bands)
-        "relative": rel_power,               # (epochs, labels, n_bands)
-        "paf": paf,                           # (epochs, labels)
-        "aperiodic_slope": slopes,           # (epochs, labels)
-        "aperiodic_intercept": intercepts,   # (epochs, labels)
-        "bands": band_names,
-        "freqs": freqs
-    }
-
-
-eps = 1e-12
-log_abs = np.log10(abs_power_median + eps)
-
-'''
-Primary NM features: log_abs_power (per band × ROI) plus aperiodic_slope, aperiodic_intercept, and log_total_power as covariates or extra targets. Also include age, sex, PTA, site.
-'''
+    return features
 
 
 
-from mne_connectivity import EpochSpectralConnectivity
+
 
 con = EpochSpectralConnectivity(data, freqs, n_nodes, names=None, indices='all', method=None, spec_method=None)
 con_data = con.get_data()
+
+
+
+
+
+if __name__ == "__main__":
+
+    bands = {
+            "delta": (1, 6),
+            "theta": (6.5, 8.5),
+            "alpha_1": (8.5, 10.5),
+            "alpha_2": (10.5, 12.5),
+            "beta_1": (12.5, 18.5),
+            "beta_2": (18.5, 21),
+            "beta_3": (21, 30),
+            "gamma": (30, 40),
+            }
+
+    # compute_spectral_features()
+
+    
