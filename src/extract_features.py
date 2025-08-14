@@ -1,12 +1,19 @@
+import os
+import sys
+from pathlib import Path
+sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '..')))
+
 import numpy as np
-from mne.time_frequency import psd_array_welch
-from fooof import FOOOF
 from tqdm import tqdm
-from mne_connectivity import EpochSpectralConnectivity
+from fooof import FOOOF
+from mne.time_frequency import psd_array_welch
+from mne_connectivity import spectral_connectivity_time
+from tools.learn_graph import log_degree_barrier
 
 def compute_spectral_features(
-                                data,
-                                sfreq,
+                                site,
+                                subject_id,
+                                atlas,
                                 bands,
                                 fmin=1,
                                 fmax=45,
@@ -15,39 +22,18 @@ def compute_spectral_features(
                                 n_overlap=0,
                                 n_per_seg=None,
                                 relative=False,
-                                eps=1e-12
+                                eps=1e-12,
+                                saving_dir
                             ):
-    """
-    Compute band power, PAF, and 1/f slope/intercept using FOOOF.
-
-    Parameters
-    ----------
-    data : ndarray, shape (epochs, labels, times)
-        EEG time series.
-    sfreq : float
-        Sampling frequency in Hz.
-    bands : dict
-        e.g. {"delta": (1, 4), "theta": (4, 8), ...}
-    fmin, fmax : float
-        Min and max freq for PSD.
-    relative : bool
-        Return relative power instead of absolute.
-    eps : float
-        Small constant to avoid log(0).
-
-    Returns
-    -------
-    features : dict of np.ndarray
-        Keys: band power per band, 'slope', 'intercept'
-    """
     
+    data = np.load("...", allow_pickle=True)
     n_epochs, n_labels, _ = data.shape
     n_bands = len(bands)
 
     # PSD
     psd, freqs = psd_array_welch(
         data.reshape(-1, data.shape[-1]),
-        sfreq=sfreq, fmin=fmin, fmax=fmax,
+        sfreq=250, fmin=fmin, fmax=fmax,
         n_fft=n_fft, n_overlap=n_overlap, n_per_seg=n_per_seg,
         average="mean"
     )
@@ -84,15 +70,57 @@ def compute_spectral_features(
 
     for b in bands:
         features[f"{b}_power"] = np.log10(features[f"{b}_power"] + eps)
+        fname_save
+        np.save()
 
     return features
 
 
+def compute_connectivity_features(
+                                    site,
+                                    subject_id,
+                                    atlas,
+                                    bands,
+                                    methods,
+                                    saving_dir
+                                    )
+
+    data = np.load("....", allow_pickle=True)
+    n_labels = {"dk": 68, "sch7": 7, "sch17": 17}
+    n_label = n_labels[atlas]
+    tril_idx = np.tril_indices(n_label, k=-1)
+
+    con_dict = {}
+    for band, fminmax in bands.items():
+        cons = spectral_connectivity_time(
+                                        data,
+                                        freqs=np.linspace(fminmax[0], fminmax[1], 5),
+                                        method=methods,
+                                        average=False,
+                                        sfreq=250,
+                                        fmin=1,
+                                        fmax=45,
+                                        faverage=True,
+                                        mode="multitaper",
+                                    )
+        for con, method in zip(cons, methods):
+            con_data = con.get_data()[:, :, 0]
+            con_data_smaller = con_data[:, np.ravel_multi_index(tril_idx, (n_label, n_label))]
+            fname_save = saving_dir / "connectivity" / method / f"{site}_{subject_id}_{atlas}_{band}.npy"
+            np.save(fname_save, con_data_smaller)
 
 
 
-con = EpochSpectralConnectivity(data, freqs, n_nodes, names=None, indices='all', method=None, spec_method=None)
-con_data = con.get_data()
+
+def compute_graph_features(
+                            site,
+                            subject_id,
+                            atlas,
+                            bands,
+                            saving_dir
+                            )
+
+
 
 
 
@@ -110,7 +138,9 @@ if __name__ == "__main__":
             "beta_3": (21, 30),
             "gamma": (30, 40),
             }
+    methods = ["coh", "plv"]
 
     # compute_spectral_features()
-
+    # compute_connectivity_features()
+    # compute_graph_features()
     
