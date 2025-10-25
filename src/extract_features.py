@@ -109,56 +109,6 @@ def compute_connectivity_features(
             fname_save = saving_dir / "connectivity" / method / f"{site}_{subject_id}_{atlas}_{band}.npy"
             np.save(fname_save, con_data_smaller)
 
-
-
-
-def compute_graph_features(
-                            site,
-                            subject_id,
-                            atlas,
-                            bands,
-                            saving_dir
-                            )
-
-
-    data = np.load("..", allow_pickle=True)
-    n_epochs, n_label, _ = data.shape
-    data_reshaped = data.reshape(-1, data.shape[-1])
-    tril_idxs = np.tril_indices(68, k=-1)
-
-    for band, fminmax in bands.items():
-    
-        filtered_data = filter_data(
-                                    data_reshaped,
-                                    sfreq=250,
-                                    l_freq=8,
-                                    h_freq=15,
-                                    )
-        filtered_data = filtered_data.reshape(n_epochs, n_label, -1)
-        
-        cons = []
-        for ep in filtered_data:
-            graph = log_degree_barrier(
-                                        X=ep,
-                                        dist_type='sqeuclidean',
-                                        alpha=1,
-                                        beta=1,
-                                        step=0.5,
-                                        w0=None,
-                                        maxit=10000,
-                                        rtol=1e-16,
-                                        retall=False,
-                                        verbosity='LOW'
-                                        )
-            cons.append(graph[tril_idxs])
-        cons = np.array(cons)
-        
-        fname_save = ""
-        np.save("", cons)
-
-
-
-
 if __name__ == "__main__":
 
     bands = {
@@ -174,5 +124,4 @@ if __name__ == "__main__":
 
     # compute_spectral_features()
     # compute_connectivity_features()
-    # compute_graph_features()
     
