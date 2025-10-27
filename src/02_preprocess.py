@@ -1,12 +1,21 @@
 from pathlib import Path
+
 import numpy as np
-from mne.io import read_raw
+import mne
+from mne import (
+    Annotations,
+    Report,
+    concatenate_raws,
+    events_from_annotations,
+    make_fixed_length_epochs,
+    set_log_level
+)
 from mne.channels import make_standard_montage
-from mne import make_fixed_length_epochs
+from mne.io import read_raw
 from mne.preprocessing import ICA
+
 from mne_icalabel import label_components
 from autoreject import AutoReject
-from mne import Report, set_log_level
 set_log_level("Error")
 
 def preprocess(subject_id, bids_root):
@@ -61,7 +70,7 @@ def preprocess(subject_id, bids_root):
         },
     }
 
-    
+    ## get site specific parameters
     site = site_map.get(str(subject_id)[0], "unknown")
     folder = bids_root / f"sub-{subject_id}" / "ses-01" / "eeg"
     params = site_params.get(site, {"suffix": "vhdr", "chs_to_drop": [], "montage": "easycap-M1"})
@@ -75,12 +84,35 @@ def preprocess(subject_id, bids_root):
     h_freq = 100.0
     crop_duration = 5.0
     epoch_duration = 10.0
+    zurich_cutoff = 3.0
     overwrite = True
 
     raw = read_raw(fname, preload=True)
     raw.drop_channels(ch_names=chs_to_drop, on_missing="warn")
     montage = make_standard_montage(montage_name)
     raw.set_montage(montage, match_case=False, on_missing="warn")
+
+    ## annotations
+    if site == "zuerich":
+        if subject_id == "70006":
+            ec_event_id = 'Stimulus/S  4'
+        else:
+            ec_event_id = 'Stimulus/S  5'
+
+        events, event_ids = events_from_annotations(raw)
+        event_key = event_ids[ec_event_id]
+        events_ec = events[events[:, 2] == event_key]
+        if len(events_ec) != 5:
+            raise ValueError(f"number close eye events should be 5, got {len(events_ec)} instead.") 
+
+        onsets = (events_ec[:, 0] + zurich_cutoff * raw.info["sfreq"]) / raw.info["sfreq"]
+        duration = (60 - 2 * zurich_cutoff) * np.ones(shape=len(onsets))
+        annots = Annotations(onsets, duration, description="ec")
+        raw.set_annotations(annots)
+        raw = concatenate_raws(raw.crop_by_annotations())
+    
+    else:
+        raw.annotations.delete(range(len(raw.annotations)))
 
     ## preproc_1
     raw.crop(tmin=crop_duration, tmax=raw.times[-1] - crop_duration)
