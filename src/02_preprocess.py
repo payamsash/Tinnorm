@@ -49,7 +49,7 @@ def preprocess(subject_id, bids_root):
         "illinois": {
             "suffix": "vhdr",
             "chs_to_drop": ["VEOG", "HEOG", "Trigger", "F11", "F12",
-                            "FT11", "FT12", "M1", "M2", "Cb1", "Cb2"],
+                            "FT11", "FT12", "M1", "M2", "Cb1", "Cb2", "EKG", "EMG"],
             "montage": "easycap-M1",
         },
         "regensburg": {
@@ -181,7 +181,7 @@ def preprocess(subject_id, bids_root):
 if __name__ == "__main__":
     bids_root = Path("/Volumes/Extreme_SSD/payam_data/Tide_data/BIDS")
     subject_ids = sorted([f.name[4:] for f in bids_root.iterdir() if f.is_dir()])
-    subject_ids = [sub for sub in subject_ids if sub.startswith("1")]
+    subject_ids = [sub for sub in subject_ids if sub.startswith("1", "2", "3", "4", "5", "6", "7")]
     
     for subject_id in subject_ids:
         print(f"working on subject {subject_id} ...")
