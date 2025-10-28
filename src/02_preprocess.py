@@ -136,7 +136,7 @@ def preprocess(subject_id, bids_root):
     epochs_2.save(folder / "preproc_2-epo.fif", overwrite=overwrite)
 
     ## preproc 3
-    ica = ICA(n_components=0.999, method='fastica')
+    ica = ICA(n_components=None, method='fastica')
     try:
         ica.fit(epochs_2)
     except:
@@ -151,7 +151,7 @@ def preprocess(subject_id, bids_root):
 
     ## create report
     ## preproc_1
-    report = Report(title="10001")
+    report = Report(title=f"{subject_id}")
     report.add_epochs(epochs=epochs_1, image_kwargs={}, psd=False, title='Epochs_preproc1')
 
     ## preproc_2
