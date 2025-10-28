@@ -50,7 +50,8 @@ def compute_source_features(
     inv_fname = inv_dir / f"{site}-inv.fif"
 
     ## read epochs
-    epochs_fname = bids_root / f"sub-{subject_id}" / "ses-01" / "eeg" / f"preproc_{preproc_level}-epo.fif"
+    subject_dir = bids_root / f"sub-{subject_id}" / "ses-01" / "eeg"
+    epochs_fname = subject_dir / f"preproc_{preproc_level}-epo.fif"
     epochs = read_epochs(epochs_fname, preload=True)
     epochs.set_eeg_reference("average", projection=True)
 
@@ -113,7 +114,6 @@ def compute_source_features(
     reshaped_data = label_ts.reshape(-1, n_times)
     freqs, psd = welch(reshaped_data, epochs.info["sfreq"], axis=-1, nperseg=min(256, n_times))
 
-    ## write it to df
     columns = []
     labels_power = []
     for key, value in freq_bands.items():
@@ -125,6 +125,11 @@ def compute_source_features(
 
     labels_power = np.concatenate(labels_power, axis=1)
     df_power = pd.DataFrame(labels_power, columns=columns)
+
+    ## save it
+    csv_fname = subject_dir / f"power_preproc_{preproc_level}.csv"
+    df_power.to_csv(csv_fname)
+    del df_power
         
     ## compute connectivity (pli, plv, coh)
     lb_names = [lb.name for lb in labels]
@@ -157,23 +162,41 @@ def compute_source_features(
             columns += con_labels
 
     freq_cons = np.concatenate(freq_cons, axis=-1)
-    df_conn = pd.DataFrame(freq_cons, columns=columns)
+    df_conn = pd.DataFrame(freq_cons, columns=columns).T
+
+    ## save it
+    csv_fname = subject_dir / f"conn_preproc_{preproc_level}.csv"
+    df_conn.to_csv(csv_fname)
+    del df_conn
+
+    # compute aperiodic param per whole recording
+    fmin, fmax = 1, 40
+    ep_psds, freqs = psd_array_multitaper(label_ts, epochs.info["sfreq"], fmin, fmax)
+    avg_psd = ep_psds.mean(axis=0)
+    fm = FOOOF()
+    columns = []
+    for lb_idx, lb_name in enumerate(lb_names):
+        fm.fit(freqs=freqs, power_spectrum=avg_psd[lb_idx], freq_range=[fmin, fmax])
+        offset, exponent = fm.aperiodic_params_
+        columns.append({
+                        f'{lb_name}_offset': offset,
+                        f'{lb_name}_exponent': exponent
+                        })
+    df_aperiodic = pd.DataFrame(columns)
+
+    ## save it
+    csv_fname = subject_dir / f"aperiodic_preproc_{preproc_level}.csv"
+    df_aperiodic.to_csv(csv_fname)
+    del df_aperiodic
+
+    ## reduce size
+    for csv_mod in ["power", "conn", "aperiodic"]:
+        csv_fname = subject_dir / f"{csv_mod}_preproc_{preproc_level}.csv"
+        with zipfile.ZipFile(csv_fname.with_suffix(".zip"), "w", zipfile.ZIP_DEFLATED) as zipf:
+            zipf.write(csv_fname, os.path.basename(csv_fname))
+        os.remove(csv_fname)
 
 
-
-# compute aperiodic param per whole recording
-fmin, fmax = 1, 40
-ep_psds, freqs = psd_array_multitaper(label_ts, epochs.info["sfreq"], fmin, fmax)
-avg_psd = ep_psd.mean(axis=0)
-fm = FOOOF()
-
-
-fm.fit(freqs=freqs, power_spectrum=avg_psd[lb_idx], freq_range=[fmin, fmax])
-fm.aperiodic_params_
-
-
-
-## create dfs out ot it (transpose only conn them and zip them) 
 
 if __name__ == "__main__":
     preproc_level = 1
