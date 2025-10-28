@@ -19,6 +19,9 @@ from mne.minimum_norm import (read_inverse_operator,
                                 apply_inverse_epochs,
                                 make_inverse_operator,
                                 write_inverse_operator)
+from mne.time_frequency import psd_array_multitaper
+from fooof import FOOOF
+
 set_log_level("Error")
 
 def compute_source_features(
@@ -159,6 +162,14 @@ def compute_source_features(
 
 
 # compute aperiodic param per whole recording
+fmin, fmax = 1, 40
+ep_psds, freqs = psd_array_multitaper(label_ts, epochs.info["sfreq"], fmin, fmax)
+avg_psd = ep_psd.mean(axis=0)
+fm = FOOOF()
+
+
+fm.fit(freqs=freqs, power_spectrum=avg_psd[lb_idx], freq_range=[fmin, fmax])
+fm.aperiodic_params_
 
 
 
@@ -168,5 +179,9 @@ if __name__ == "__main__":
     preproc_level = 1
     bids_root = Path("/Users/payamsadeghishabestari/temp_folder/tide_subjects")
     subject_ids = sorted([f.name[4:] for f in bids_root.iterdir() if f.is_dir()])
+
+
+    freq_bands = {"alpha": [8, 13], "theta": [4, 8]}
+    con_methods = ["pli", "plv", "coh"]
     
     compute_source_features(subject_id, bids_root, preproc_level, atlas="aparc")
