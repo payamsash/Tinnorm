@@ -140,12 +140,17 @@ def compute_source_features(
         
     ## compute connectivity (pli, plv, coh)
     if compute_conn:
-        print("Computing connectivity values ...")
         i_lower, j_lower = np.tril_indices_from(np.zeros(shape=(label_ts.shape[1], label_ts.shape[1])), k=-1)
         columns = []
         freq_cons = []
         for key, value in freq_bands.items(): 
+            if key == "delta":
+                n_cycles = value[1] / 6
+            else:
+                n_cycles = 7
+            
             for con_method in con_methods:
+                print(f"Computing {con_method} connectivity values for {key} frange...")
                 con = spectral_connectivity_time(
                                                 label_ts,
                                                 freqs=np.arange(value[0], value[1], 5),
@@ -155,7 +160,8 @@ def compute_source_features(
                                                 mode="cwt_morlet",
                                                 fmin=value[0],
                                                 fmax=value[1],
-                                                faverage=True
+                                                faverage=True,
+                                                n_cycles=n_cycles
                                                 )
                 con_matrix = np.squeeze(con.get_data(output="dense")) # n_epochs * n_labels * n_labels
 
@@ -216,7 +222,7 @@ if __name__ == "__main__":
 
     subject_id = 20001
     freq_bands = {
-                #"delta": [1, 6],
+                "delta": [1, 6],
                 "theta": [6.5, 8.5],
                 "alpha_0": [8.5, 12.5],
                 "alpha_1": [8.5, 10.5],
@@ -237,5 +243,5 @@ if __name__ == "__main__":
                             atlas="aparc",
                             compute_power=True,
                             compute_conn=True,
-                            compute_aperiodic=True
+                            compute_aperiodic=False
                             )
