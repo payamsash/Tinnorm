@@ -1,27 +1,31 @@
 import os
-from mne import read_epochs
-from mne.datasets import fetch_fsaverage
 from pathlib import Path
 import zipfile
+
 import numpy as np
 import pandas as pd
 from scipy.signal import welch
-from mne_connectivity import spectral_connectivity_time
 
-from mne import (set_log_level,
-                    read_epochs,
-                    read_labels_from_annot,
-                    extract_label_time_course,
-                    make_forward_solution,
-                    make_ad_hoc_cov
-                    )
-from mne.minimum_norm import (read_inverse_operator,
-                                apply_inverse_epochs,
-                                make_inverse_operator,
-                                write_inverse_operator)
+from mne import (
+    set_log_level,
+    read_epochs,
+    read_labels_from_annot,
+    extract_label_time_course,
+    make_forward_solution,
+    make_ad_hoc_cov,
+)
+from mne.datasets import fetch_fsaverage
+from mne.minimum_norm import (
+    read_inverse_operator,
+    apply_inverse_epochs,
+    make_inverse_operator,
+    write_inverse_operator,
+)
 from mne.time_frequency import psd_array_multitaper
+from mne_connectivity import spectral_connectivity_time
 from fooof import FOOOF
-set_log_level("Error")
+
+set_log_level("ERROR")
 
 def compute_source_features(
                             subject_id,
