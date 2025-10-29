@@ -17,6 +17,7 @@
 5) Harmonization
    
    - Implement neuroHarmonize with site as batch effect
+   - maybe compute it only for controls and apply to all
    - Save harmonized features
    - Compute per-feature percent variance explained by Site
    - PCA/UMAP of feature matrixes colored by site
@@ -48,6 +49,7 @@
 1) Identify abnormal features
     
    - Site PCA / UMAP pre/post harmonization.
+   - brain maps
    - LOSO-CV calibration plot (per-site mean/SD of z).
    - Centile (growth) curves for key features vs age and PTA.
    - Group mean topography of z-scores (tinnitus vs controls).
