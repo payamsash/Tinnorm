@@ -22,7 +22,7 @@ from mne.minimum_norm import (read_inverse_operator,
 from mne.time_frequency import psd_array_multitaper
 from fooof import FOOOF
 
-set_log_level("Error")
+#set_log_level("Error")
 
 def compute_source_features(
                             subject_id,
@@ -30,7 +30,10 @@ def compute_source_features(
                             preproc_level,
                             freq_bands,
                             con_methods,
-                            atlas="aparc"
+                            atlas="aparc",
+                            compute_power=True,
+                            compute_conn=True,
+                            compute_aperiodic=True
                             ):
 
     overwrite = True
@@ -50,7 +53,7 @@ def compute_source_features(
     inv_fname = inv_dir / f"{site}-inv.fif"
 
     ## read epochs
-    subject_dir = bids_root / f"sub-{subject_id}" / "ses-01" / "eeg"
+    subject_dir = bids_root / f"sub-{subject_id}"  # / "ses-01" / "eeg" add it when in cloud
     epochs_fname = subject_dir / f"preproc_{preproc_level}-epo.fif"
     epochs = read_epochs(epochs_fname, preload=True)
     epochs.set_eeg_reference("average", projection=True)
@@ -62,9 +65,9 @@ def compute_source_features(
         labels = read_labels_from_annot(subject="fsaverage", subjects_dir=None, parc=atlas)[:-2]
 
     ## read_inverse_operator
-    if inv_fname.isdir():
+    if inv_fname.is_file():
         inverse_operator = read_inverse_operator(inv_fname)
-
+    
     else:
         noise_cov = make_ad_hoc_cov(epochs.info)
         fs_dir = fetch_fsaverage()
@@ -107,95 +110,103 @@ def compute_source_features(
                                         mode="mean_flip",
                                         return_generator=False,
                                         )
-    
-    ## compute power in labels
     label_ts = np.array(label_ts)
-    n_epochs, n_labels, n_times = label_ts.shape
-    reshaped_data = label_ts.reshape(-1, n_times)
-    freqs, psd = welch(reshaped_data, epochs.info["sfreq"], axis=-1, nperseg=min(256, n_times))
+    lb_names = [lb.name for lb in labels]
 
-    columns = []
-    labels_power = []
-    for key, value in freq_bands.items():
-        min_freq, max_freq = list(value)
-        band_mask = (freqs >= min_freq) & (freqs <= max_freq)
-        band_powers = np.trapz(psd[:, band_mask], freqs[band_mask], axis=-1)
-        labels_power.append(band_powers.reshape(n_epochs, n_labels))
-        columns += [f"{lb.name}_{key}" for lb in labels]
+    ## compute power in labels
+    if compute_power:
+        print("Computing band powers ...")
+        n_epochs, n_labels, n_times = label_ts.shape
+        reshaped_data = label_ts.reshape(-1, n_times)
+        freqs, psd = welch(reshaped_data, epochs.info["sfreq"], axis=-1, nperseg=min(256, n_times))
 
-    labels_power = np.concatenate(labels_power, axis=1)
-    df_power = pd.DataFrame(labels_power, columns=columns)
+        columns = []
+        labels_power = []
+        for key, value in freq_bands.items():
+            min_freq, max_freq = list(value)
+            band_mask = (freqs >= min_freq) & (freqs <= max_freq)
+            band_powers = np.trapz(psd[:, band_mask], freqs[band_mask], axis=-1)
+            labels_power.append(band_powers.reshape(n_epochs, n_labels))
+            columns += [f"{lb.name}_{key}" for lb in labels]
 
-    ## save it
-    csv_fname = subject_dir / f"power_preproc_{preproc_level}.csv"
-    df_power.to_csv(csv_fname)
-    del df_power
+        labels_power = np.concatenate(labels_power, axis=1)
+        df_power = pd.DataFrame(labels_power, columns=columns)
+
+        ## save it
+        print("Saving band powers ...")
+        csv_fname = subject_dir / f"power_preproc_{preproc_level}.csv"
+        df_power.to_csv(csv_fname)
+        del df_power
         
     ## compute connectivity (pli, plv, coh)
-    lb_names = [lb.name for lb in labels]
-    i_lower, j_lower = np.tril_indices_from(np.zeros(shape=(label_ts.shape[1], label_ts.shape[1])), k=-1)
-    columns = []
-    freq_cons = []
-    for key, value in freq_bands.items(): 
-        for con_method in con_methods:
-            con = spectral_connectivity_time(
-                                            label_ts,
-                                            freqs=np.arange(value[0], value[1], 5),
-                                            method=con_method,
-                                            average=False,
-                                            sfreq=epochs.info["sfreq"],
-                                            mode="cwt_morlet",
-                                            fmin=value[0],
-                                            fmax=value[1],
-                                            faverage=True
-                                            )
-            con_matrix = np.squeeze(con.get_data(output="dense")) # n_epochs * n_labels * n_labels
+    if compute_conn:
+        print("Computing connectivity values ...")
+        i_lower, j_lower = np.tril_indices_from(np.zeros(shape=(label_ts.shape[1], label_ts.shape[1])), k=-1)
+        columns = []
+        freq_cons = []
+        for key, value in freq_bands.items(): 
+            for con_method in con_methods:
+                con = spectral_connectivity_time(
+                                                label_ts,
+                                                freqs=np.arange(value[0], value[1], 5),
+                                                method=con_method,
+                                                average=False,
+                                                sfreq=epochs.info["sfreq"],
+                                                mode="cwt_morlet",
+                                                fmin=value[0],
+                                                fmax=value[1],
+                                                faverage=True
+                                                )
+                con_matrix = np.squeeze(con.get_data(output="dense")) # n_epochs * n_labels * n_labels
 
-            cons = []
-            for ep_con in con_matrix:
-                ep_con_value = ep_con[i_lower, j_lower]
-                cons.append(ep_con_value)
-            cons = np.array(cons)
-            freq_cons.append(cons)
+                cons = []
+                for ep_con in con_matrix:
+                    ep_con_value = ep_con[i_lower, j_lower]
+                    cons.append(ep_con_value)
+                cons = np.array(cons)
+                freq_cons.append(cons)
 
-            con_labels = [f"{lb_names[i]}_vs_{lb_names[j]}_{key}_{con_method}" for i, j in zip(i_lower, j_lower)]
-            columns += con_labels
+                con_labels = [f"{lb_names[i]}_vs_{lb_names[j]}_{key}_{con_method}" for i, j in zip(i_lower, j_lower)]
+                columns += con_labels
 
-    freq_cons = np.concatenate(freq_cons, axis=-1)
-    df_conn = pd.DataFrame(freq_cons, columns=columns).T
+        freq_cons = np.concatenate(freq_cons, axis=-1)
+        df_conn = pd.DataFrame(freq_cons, columns=columns).T
 
-    ## save it
-    csv_fname = subject_dir / f"conn_preproc_{preproc_level}.csv"
-    df_conn.to_csv(csv_fname)
-    del df_conn
+        ## save it
+        print("Saving connectivity values ...")
+        csv_fname = subject_dir / f"conn_preproc_{preproc_level}.csv"
+        df_conn.to_csv(csv_fname)
+        del df_conn
 
     # compute aperiodic param per whole recording
-    fmin, fmax = 1, 40
-    ep_psds, freqs = psd_array_multitaper(label_ts, epochs.info["sfreq"], fmin, fmax)
-    avg_psd = ep_psds.mean(axis=0)
-    fm = FOOOF()
-    columns = []
-    for lb_idx, lb_name in enumerate(lb_names):
-        fm.fit(freqs=freqs, power_spectrum=avg_psd[lb_idx], freq_range=[fmin, fmax])
-        offset, exponent = fm.aperiodic_params_
-        columns.append({
-                        f'{lb_name}_offset': offset,
-                        f'{lb_name}_exponent': exponent
-                        })
-    df_aperiodic = pd.DataFrame(columns)
+    if compute_aperiodic:
+        print("Computing aperiodic values ...")
+        fmin, fmax = 1, 40
+        ep_psds, freqs = psd_array_multitaper(label_ts, epochs.info["sfreq"], fmin, fmax)
+        avg_psd = ep_psds.mean(axis=0)
+        fm = FOOOF()
+        row_dict = {}
+        for lb_idx, lb_name in enumerate(lb_names):
+            print(f"Processing label {lb_idx + 1} / {len(lb_names)} ...")
+            fm.fit(freqs=freqs, power_spectrum=avg_psd[lb_idx], freq_range=[fmin, fmax])
+            offset, exponent = fm.aperiodic_params_
+            row_dict[f'{lb_name}_offset'] = offset
+            row_dict[f'{lb_name}_exponent'] = exponent
+        df_aperiodic = pd.DataFrame([row_dict])
 
-    ## save it
-    csv_fname = subject_dir / f"aperiodic_preproc_{preproc_level}.csv"
-    df_aperiodic.to_csv(csv_fname)
-    del df_aperiodic
+        ## save it
+        print("Saving aperiodic values ...")
+        csv_fname = subject_dir / f"aperiodic_preproc_{preproc_level}.csv"
+        df_aperiodic.to_csv(csv_fname)
+        del df_aperiodic
 
     ## reduce size
     for csv_mod in ["power", "conn", "aperiodic"]:
         csv_fname = subject_dir / f"{csv_mod}_preproc_{preproc_level}.csv"
-        with zipfile.ZipFile(csv_fname.with_suffix(".zip"), "w", zipfile.ZIP_DEFLATED) as zipf:
-            zipf.write(csv_fname, os.path.basename(csv_fname))
-        os.remove(csv_fname)
-
+        if csv_fname.is_file():
+            with zipfile.ZipFile(csv_fname.with_suffix(".zip"), "w", zipfile.ZIP_DEFLATED) as zipf:
+                zipf.write(csv_fname, os.path.basename(csv_fname))
+            os.remove(csv_fname)
 
 
 if __name__ == "__main__":
@@ -203,8 +214,28 @@ if __name__ == "__main__":
     bids_root = Path("/Users/payamsadeghishabestari/temp_folder/tide_subjects")
     subject_ids = sorted([f.name[4:] for f in bids_root.iterdir() if f.is_dir()])
 
-
-    freq_bands = {"alpha": [8, 13], "theta": [4, 8]}
+    subject_id = 20001
+    freq_bands = {
+                #"delta": [1, 6],
+                "theta": [6.5, 8.5],
+                "alpha_0": [8.5, 12.5],
+                "alpha_1": [8.5, 10.5],
+                "alpha_2": [10.5, 12.5],
+                "beta_0": [12.5, 30],
+                "beta_1": [12.5, 18.5],
+                "beta_2": [18.5, 21],
+                "beta_3": [21, 30],
+                "gamma": [30, 40]
+                }
     con_methods = ["pli", "plv", "coh"]
     
-    compute_source_features(subject_id, bids_root, preproc_level, atlas="aparc")
+    compute_source_features(subject_id,
+                            bids_root,
+                            preproc_level,
+                            freq_bands,
+                            con_methods,
+                            atlas="aparc",
+                            compute_power=True,
+                            compute_conn=True,
+                            compute_aperiodic=True
+                            )
