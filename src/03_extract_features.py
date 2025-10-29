@@ -216,11 +216,10 @@ def compute_source_features(
 
 
 if __name__ == "__main__":
-    preproc_level = 1
     bids_root = Path("/Users/payamsadeghishabestari/temp_folder/tide_subjects")
     subject_ids = sorted([f.name[4:] for f in bids_root.iterdir() if f.is_dir()])
-
-    subject_id = 20001
+    preproc_levels = [1, 2, 3]
+    con_methods = ["pli", "plv", "coh"]
     freq_bands = {
                 "delta": [1, 6],
                 "theta": [6.5, 8.5],
@@ -233,15 +232,19 @@ if __name__ == "__main__":
                 "beta_3": [21, 30],
                 "gamma": [30, 40]
                 }
-    con_methods = ["pli", "plv", "coh"]
-    
-    compute_source_features(subject_id,
-                            bids_root,
-                            preproc_level,
-                            freq_bands,
-                            con_methods,
-                            atlas="aparc",
-                            compute_power=True,
-                            compute_conn=True,
-                            compute_aperiodic=False
-                            )
+
+    ## running on all subjects and preproc levels
+    for subject_id in subject_ids:
+        for preproc_level in preproc_levels: 
+            print(f"Working on subject {subject_id} and preproc level {preproc_level} ...")
+            compute_source_features(
+                                    subject_id,
+                                    bids_root,
+                                    preproc_level,
+                                    freq_bands,
+                                    con_methods,
+                                    atlas="aparc",
+                                    compute_power=True,
+                                    compute_conn=True,
+                                    compute_aperiodic=True
+                                    )
