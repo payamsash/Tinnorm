@@ -21,8 +21,7 @@ from mne.minimum_norm import (read_inverse_operator,
                                 write_inverse_operator)
 from mne.time_frequency import psd_array_multitaper
 from fooof import FOOOF
-
-#set_log_level("Error")
+set_log_level("Error")
 
 def compute_source_features(
                             subject_id,
