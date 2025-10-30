@@ -94,7 +94,7 @@ def preprocess(subject_id, bids_root):
 
     ## annotations
     if site == "zuerich":
-        if subject_id == "70006":
+        if subject_id in ["70006", "70056", "70059"]:
             ec_event_id = 'Stimulus/S  4'
         else:
             ec_event_id = 'Stimulus/S  5'
@@ -102,7 +102,14 @@ def preprocess(subject_id, bids_root):
         events, event_ids = events_from_annotations(raw)
         event_key = event_ids[ec_event_id]
         events_ec = events[events[:, 2] == event_key]
-        if len(events_ec) != 5:
+
+        if subject_id == "70011": # missing last trigger
+            diffs = np.diff(events_ec[:, 0])
+            mean_diff = int(np.round(np.mean(diffs)))
+            new_row = np.array([[events_ec[-1, 0] + mean_diff, 0, 5]])
+            events_ec = np.vstack([events_ec, new_row])
+
+        if len(events_ec) != 5 and subject_id != "70048":
             raise ValueError(f"number close eye events should be 5, got {len(events_ec)} instead.") 
 
         onsets = (events_ec[:, 0] + zurich_cutoff * raw.info["sfreq"]) / raw.info["sfreq"]
