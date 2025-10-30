@@ -219,7 +219,7 @@ def compute_source_features(
 
 
 if __name__ == "__main__":
-    bids_root = Path("/Users/payamsadeghishabestari/temp_folder/tide_subjects")
+    bids_root = Path("/home/ubuntu/volume/Tinnorm/BIDS")
     subject_ids = sorted([f.name[4:] for f in bids_root.iterdir() if f.is_dir()])
     preproc_levels = [1, 2, 3]
     con_methods = ["pli", "plv", "coh"]
@@ -239,15 +239,16 @@ if __name__ == "__main__":
     ## running on all subjects and preproc levels
     for subject_id in subject_ids:
         for preproc_level in preproc_levels: 
-            print(f"Working on subject {subject_id} and preproc level {preproc_level} ...")
-            compute_source_features(
-                                    subject_id,
-                                    bids_root,
-                                    preproc_level,
-                                    freq_bands,
-                                    con_methods,
-                                    atlas="aparc",
-                                    compute_power=True,
-                                    compute_conn=True,
-                                    compute_aperiodic=True
-                                    )
+            if (bids_root / f"sub-{subject_id}" / "ses-01" / "eeg" / "preproc_3-epo.fif").is_file():
+                print(f"Working on subject {subject_id} and preproc level {preproc_level} ...")
+                compute_source_features(
+                                        subject_id,
+                                        bids_root,
+                                        preproc_level,
+                                        freq_bands,
+                                        con_methods,
+                                        atlas="aparc",
+                                        compute_power=True,
+                                        compute_conn=True,
+                                        compute_aperiodic=True
+                                        )
