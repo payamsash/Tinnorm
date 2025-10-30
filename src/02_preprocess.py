@@ -127,6 +127,11 @@ def preprocess(subject_id, bids_root):
     raw.resample(sfreq=sfreq)
     raw.set_eeg_reference("average", projection=False)
     epochs_1 = make_fixed_length_epochs(raw, duration=epoch_duration, preload=True)
+
+    if site == "austin": # convert austin montage to easycap so ICA label could work better
+        montage_std = make_standard_montage("easycap-M1")
+        epochs_1 = epochs_1.interpolate_to(montage_std)
+
     epochs_1.save(folder / "preproc_1-epo.fif", overwrite=overwrite)
 
     ## preproc_2
@@ -153,6 +158,10 @@ def preprocess(subject_id, bids_root):
     ic_labels = label_components(epochs_2, ica, method="iclabel")["labels"]
     artifact_idxs = [idx for idx, label in enumerate(ic_labels) \
                     if not label in ["brain", "other"]]
+
+    if site == "austin" and 0 not in artifact_idxs: # add first idx to ica drop in austin
+        artifact_idxs = [0] + artifact_idxs
+
     epochs_3 = ica.apply(epochs_2.copy(), exclude=artifact_idxs)
     epochs_3.save(folder / "preproc_3-epo.fif", overwrite=overwrite)
 
