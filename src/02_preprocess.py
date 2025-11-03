@@ -122,16 +122,15 @@ def preprocess(subject_id, bids_root):
         raw.annotations.delete(range(len(raw.annotations)))
 
     ## preproc_1
+    if site == "austin":
+        to_montage = make_standard_montage("easycap-M1") # convert austin montage to easycap so ICA label could work better and align with other sites
+        raw = raw.interpolate_to(to_montage)
+
     raw.crop(tmin=crop_duration, tmax=raw.times[-1] - crop_duration)
     raw.filter(l_freq=l_freq, h_freq=h_freq)
     raw.resample(sfreq=sfreq)
     raw.set_eeg_reference("average", projection=False)
     epochs_1 = make_fixed_length_epochs(raw, duration=epoch_duration, preload=True)
-
-    if site == "austin": # convert austin montage to easycap so ICA label could work better
-        montage_std = make_standard_montage("easycap-M1")
-        epochs_1 = epochs_1.interpolate_to(montage_std)
-
     epochs_1.save(folder / "preproc_1-epo.fif", overwrite=overwrite)
 
     ## preproc_2
@@ -195,9 +194,9 @@ def preprocess(subject_id, bids_root):
     report.save(fname=folder / "report.html", open_browser=False, overwrite=overwrite)
 
 if __name__ == "__main__":
-    bids_root = Path("/Volumes/Extreme_SSD/payam_data/Tide_data/BIDS")
+    bids_root = Path("/Users/payamsadeghishabestari/temp_folder/tide_subjects")
     subject_ids = sorted([f.name[4:] for f in bids_root.iterdir() if f.is_dir()])
-    subject_ids = [sub for sub in subject_ids if sub in ["70006", "70056", "70059", "70011", "70048"]]
+    subject_ids = [sub for sub in subject_ids if sub.startswith("1")]
     
     for subject_id in subject_ids:
         print(f"working on subject {subject_id} ...")
