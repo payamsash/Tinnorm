@@ -2,6 +2,35 @@ from pathlib import Path
 from warnings import warn
 import pandas as pd
 
+"""
+Master Data Preprocessing Script for TIDE Study
+
+This script loads and processes behavioural questionnaire and audiometry data 
+from multiple TIDE study sites, merges them into a single clean dataset, 
+and saves the resulting master CSV file.
+
+Processing steps:
+1. Define directories and mapping of site codes to site names.
+2. Specify the columns to keep from questionnaires (`quest_cols`) 
+    and audiometry files (`audio_cols`).
+3. Loop over each site:
+    - Check if both questionnaire and audiometry files exist.
+    - Load CSV files with proper encoding to handle BOM characters.
+    - Verify that all required columns are present; skip site if not.
+    - Standardize the subject ID as a string for consistent merging.
+    - Compute mean PTA values across ears (`PTA4_mean`, `PTA_HF_mean`, `PTA_TIDE_mean`) 
+    and drop the original columns.
+    - Merge questionnaire and audiometry data on `study_id`.
+4. Concatenate all sites into a single dataframe.
+5. Rename key columns for clarity (e.g., `intro_gender` → `sex`, `esit_a1` → `age`).
+6. Drop rows with missing values in critical columns (`age`, `sex`, `site`, `hq_score`, 
+    `group`, `PTA4_mean`, `PTA_TIDE_mean`).
+7. Sort the dataframe by `site` and `subject_id`.
+8. Save the cleaned, combined dataset as `master.csv` in the behavioural directory.
+
+Author: Payam S. Shabestari
+"""
+
 behavioural_dir = Path.cwd().parent / "material" 
 site_map = {
         "1": "austin",
@@ -49,7 +78,6 @@ avg_pairs = {
             "PTA_TIDE_mean": ["PTA_TIDE_ARE", "PTA_TIDE_ALE"]
             }
 
-
 dfs = []
 for site in site_map.values():
     site_code = site.upper()[:3]
@@ -95,3 +123,25 @@ for site in site_map.values():
     dfs.append(df[["site"] + quest_cols + list(avg_pairs.keys())])
 
 df_all = pd.concat(dfs, ignore_index=True)
+mapping = {
+            "study_id": "subject_id",
+            "intro_gender": "sex",
+            "esit_a1":"age",
+            "esit_a8_tin": "group",
+            "esit_a8_hl": "hearing_loss"
+            } 
+df_all.rename(columns=mapping, inplace=True)
+
+cols_required = [
+                "age",
+                "sex",
+                "site",
+                "hq_score",
+                "group",
+                "PTA4_mean",
+                "PTA_TIDE_mean"
+            ]
+
+df_all.dropna(subset=cols_required, inplace=True)
+df_all.sort_values(by=["site", "subject_id"], inplace=True)
+df_all.to_csv(behavioural_dir / "master.csv")
