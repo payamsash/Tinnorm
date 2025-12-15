@@ -27,17 +27,18 @@ from fooof import FOOOF
 
 set_log_level("ERROR")
 
-def compute_source_features(
-                            subject_id,
-                            bids_root,
-                            preproc_level,
-                            freq_bands,
-                            con_methods,
-                            atlas="aparc",
-                            compute_power=True,
-                            compute_conn=True,
-                            compute_aperiodic=True
-                            ):
+def compute_features(
+                    subject_id,
+                    bids_root,
+                    preproc_level,
+                    freq_bands,
+                    con_methods,
+                    mode="sensor",
+                    atlas="aparc",
+                    compute_power=True,
+                    compute_conn=True,
+                    compute_aperiodic=True
+                    ):
 
     overwrite = True
     site_map = {
@@ -51,9 +52,11 @@ def compute_source_features(
         }
 
     site = site_map.get(str(subject_id)[0], "unknown")
-    inv_dir = bids_root.parent / "invs"
-    os.makedirs(inv_dir, exist_ok=True)
-    inv_fname = inv_dir / f"{site}-inv.fif"
+    
+    if mode == "source":
+        inv_dir = bids_root.parent / "invs"
+        os.makedirs(inv_dir, exist_ok=True)
+        inv_fname = inv_dir / f"{site}-inv.fif"
 
     ## read epochs
     subject_dir = bids_root / f"sub-{subject_id}"  # / "ses-01" / "eeg" add it when in cloud
@@ -62,152 +65,165 @@ def compute_source_features(
     epochs.set_eeg_reference("average", projection=True)
 
     ## read labels
-    if atlas == "aparc":
-        labels = read_labels_from_annot(subject="fsaverage", subjects_dir=None, parc=atlas)[:-1]
-    if atlas == "aparc.a2009s":
-        labels = read_labels_from_annot(subject="fsaverage", subjects_dir=None, parc=atlas)[:-2]
+    if mode == "source":
+        if atlas == "aparc":
+            labels = read_labels_from_annot(subject="fsaverage", subjects_dir=None, parc=atlas)[:-1]
+        if atlas == "aparc.a2009s":
+            labels = read_labels_from_annot(subject="fsaverage", subjects_dir=None, parc=atlas)[:-2]
 
-    ## read_inverse_operator
-    if inv_fname.is_file():
-        inverse_operator = read_inverse_operator(inv_fname)
+        ## read_inverse_operator
+        if inv_fname.is_file():
+            inverse_operator = read_inverse_operator(inv_fname)
     
-    else:
-        noise_cov = make_ad_hoc_cov(epochs.info)
-        fs_dir = fetch_fsaverage()
-        trans = fs_dir / "bem" / "fsaverage-trans.fif"
-        src = fs_dir / "bem" / "fsaverage-ico-5-src.fif"
-        bem = fs_dir / "bem" / "fsaverage-5120-5120-5120-bem-sol.fif"
-        fwd = make_forward_solution(
-                                    epochs.info,
-                                    trans=trans,
-                                    src=src,
-                                    bem=bem,
-                                    meg=False,
-                                    eeg=True
-                                    )
-        inverse_operator = make_inverse_operator(
-                                                epochs.info,
-                                                fwd,
-                                                noise_cov
-                                                )
-        write_inverse_operator(
-                            fname=inv_fname,
-                            inv=inverse_operator,
-                            overwrite=overwrite
-                            )
-
-    ## extract brain label signals
-    stcs = apply_inverse_epochs(
-                                epochs,
-                                inverse_operator,
-                                lambda2=1.0 / (1.0 ** 2),
-                                method="dSPM",
-                                label=None,
-                                pick_ori="normal",
-                                return_generator=False
-                                )
-    label_ts = extract_label_time_course(
-                                        stcs,
-                                        labels,
-                                        inverse_operator["src"],
-                                        mode="mean_flip",
-                                        return_generator=False,
+        else:
+            noise_cov = make_ad_hoc_cov(epochs.info)
+            fs_dir = fetch_fsaverage()
+            trans = fs_dir / "bem" / "fsaverage-trans.fif"
+            src = fs_dir / "bem" / "fsaverage-ico-5-src.fif"
+            bem = fs_dir / "bem" / "fsaverage-5120-5120-5120-bem-sol.fif"
+            fwd = make_forward_solution(
+                                        epochs.info,
+                                        trans=trans,
+                                        src=src,
+                                        bem=bem,
+                                        meg=False,
+                                        eeg=True
                                         )
-    label_ts = np.array(label_ts)
-    lb_names = [lb.name for lb in labels]
+            inverse_operator = make_inverse_operator(
+                                                    epochs.info,
+                                                    fwd,
+                                                    noise_cov
+                                                    )
+            write_inverse_operator(
+                                fname=inv_fname,
+                                inv=inverse_operator,
+                                overwrite=overwrite
+                                )
+
+        ## extract brain label signals
+        stcs = apply_inverse_epochs(
+                                    epochs,
+                                    inverse_operator,
+                                    lambda2=1.0 / (1.0 ** 2),
+                                    method="dSPM",
+                                    label=None,
+                                    pick_ori="normal",
+                                    return_generator=False
+                                    )
+        label_ts = extract_label_time_course(
+                                            stcs,
+                                            labels,
+                                            inverse_operator["src"],
+                                            mode="mean_flip",
+                                            return_generator=False,
+                                            )
+        label_ts = np.array(label_ts)
+        lb_names = [lb.name for lb in labels]
 
     ## compute power in labels
     if compute_power:
-        print("Computing band powers ...")
-        n_epochs, n_labels, n_times = label_ts.shape
-        reshaped_data = label_ts.reshape(-1, n_times)
-        freqs, psd = welch(reshaped_data, epochs.info["sfreq"], axis=-1, nperseg=min(256, n_times))
+        if mode == "sensor":
+            pass
 
-        columns = []
-        labels_power = []
-        for key, value in freq_bands.items():
-            min_freq, max_freq = list(value)
-            band_mask = (freqs >= min_freq) & (freqs <= max_freq)
-            band_powers = np.trapz(psd[:, band_mask], freqs[band_mask], axis=-1)
-            labels_power.append(band_powers.reshape(n_epochs, n_labels))
-            columns += [f"{lb.name}_{key}" for lb in labels]
+        if mode == "source":
+            print("Computing band powers ...")
+            n_epochs, n_labels, n_times = label_ts.shape
+            reshaped_data = label_ts.reshape(-1, n_times)
+            freqs, psd = welch(reshaped_data, epochs.info["sfreq"], axis=-1, nperseg=min(256, n_times))
 
-        labels_power = np.concatenate(labels_power, axis=1)
-        df_power = pd.DataFrame(labels_power, columns=columns)
+            columns = []
+            labels_power = []
+            for key, value in freq_bands.items():
+                min_freq, max_freq = list(value)
+                band_mask = (freqs >= min_freq) & (freqs <= max_freq)
+                band_powers = np.trapz(psd[:, band_mask], freqs[band_mask], axis=-1)
+                labels_power.append(band_powers.reshape(n_epochs, n_labels))
+                columns += [f"{lb.name}_{key}" for lb in labels]
 
-        ## save it
-        print("Saving band powers ...")
-        csv_fname = subject_dir / f"power_preproc_{preproc_level}.csv"
-        df_power.to_csv(csv_fname)
-        del df_power
+            labels_power = np.concatenate(labels_power, axis=1)
+            df_power = pd.DataFrame(labels_power, columns=columns)
+
+            ## save it
+            print("Saving band powers ...")
+            csv_fname = subject_dir / f"power_preproc_{preproc_level}.csv"
+            df_power.to_csv(csv_fname)
+            del df_power
         
     ## compute connectivity (pli, plv, coh)
     if compute_conn:
-        i_lower, j_lower = np.tril_indices_from(np.zeros(shape=(label_ts.shape[1], label_ts.shape[1])), k=-1)
-        columns = []
-        freq_cons = []
-        for key, value in freq_bands.items(): 
-            if key == "delta":
-                n_cycles = value[1] / 6
-            else:
-                n_cycles = 7
-            
-            for con_method in con_methods:
-                print(f"Computing {con_method} connectivity values for {key} frange...")
-                con = spectral_connectivity_time(
-                                                label_ts,
-                                                freqs=np.arange(value[0], value[1], 5),
-                                                method=con_method,
-                                                average=False,
-                                                sfreq=epochs.info["sfreq"],
-                                                mode="cwt_morlet",
-                                                fmin=value[0],
-                                                fmax=value[1],
-                                                faverage=True,
-                                                n_cycles=n_cycles
-                                                )
-                con_matrix = np.squeeze(con.get_data(output="dense")) # n_epochs * n_labels * n_labels
+        if mode == "sensor":
+            pass
 
-                cons = []
-                for ep_con in con_matrix:
-                    ep_con_value = ep_con[i_lower, j_lower]
-                    cons.append(ep_con_value)
-                cons = np.array(cons)
-                freq_cons.append(cons)
+        if mode == "source":
+            i_lower, j_lower = np.tril_indices_from(np.zeros(shape=(label_ts.shape[1], label_ts.shape[1])), k=-1)
+            columns = []
+            freq_cons = []
+            for key, value in freq_bands.items(): 
+                if key == "delta":
+                    n_cycles = value[1] / 6
+                else:
+                    n_cycles = 7
+                
+                for con_method in con_methods:
+                    print(f"Computing {con_method} connectivity values for {key} frange...")
+                    con = spectral_connectivity_time(
+                                                    label_ts,
+                                                    freqs=np.arange(value[0], value[1], 5),
+                                                    method=con_method,
+                                                    average=False,
+                                                    sfreq=epochs.info["sfreq"],
+                                                    mode="cwt_morlet",
+                                                    fmin=value[0],
+                                                    fmax=value[1],
+                                                    faverage=True,
+                                                    n_cycles=n_cycles
+                                                    )
+                    con_matrix = np.squeeze(con.get_data(output="dense")) # n_epochs * n_labels * n_labels
 
-                con_labels = [f"{lb_names[i]}_vs_{lb_names[j]}_{key}_{con_method}" for i, j in zip(i_lower, j_lower)]
-                columns += con_labels
+                    cons = []
+                    for ep_con in con_matrix:
+                        ep_con_value = ep_con[i_lower, j_lower]
+                        cons.append(ep_con_value)
+                    cons = np.array(cons)
+                    freq_cons.append(cons)
 
-        freq_cons = np.concatenate(freq_cons, axis=-1)
-        df_conn = pd.DataFrame(freq_cons, columns=columns).T
+                    con_labels = [f"{lb_names[i]}_vs_{lb_names[j]}_{key}_{con_method}" for i, j in zip(i_lower, j_lower)]
+                    columns += con_labels
 
-        ## save it
-        print("Saving connectivity values ...")
-        csv_fname = subject_dir / f"conn_preproc_{preproc_level}.csv"
-        df_conn.to_csv(csv_fname)
-        del df_conn
+            freq_cons = np.concatenate(freq_cons, axis=-1)
+            df_conn = pd.DataFrame(freq_cons, columns=columns).T
+
+            ## save it
+            print("Saving connectivity values ...")
+            csv_fname = subject_dir / f"conn_preproc_{preproc_level}.csv"
+            df_conn.to_csv(csv_fname)
+            del df_conn
 
     # compute aperiodic param per whole recording
     if compute_aperiodic:
-        print("Computing aperiodic values ...")
-        fmin, fmax = 1, 40
-        ep_psds, freqs = psd_array_multitaper(label_ts, epochs.info["sfreq"], fmin, fmax)
-        avg_psd = ep_psds.mean(axis=0)
-        fm = FOOOF()
-        row_dict = {}
-        for lb_idx, lb_name in enumerate(lb_names):
-            print(f"Processing label {lb_idx + 1} / {len(lb_names)} ...")
-            fm.fit(freqs=freqs, power_spectrum=avg_psd[lb_idx], freq_range=[fmin, fmax])
-            offset, exponent = fm.aperiodic_params_
-            row_dict[f'{lb_name}_offset'] = offset
-            row_dict[f'{lb_name}_exponent'] = exponent
-        df_aperiodic = pd.DataFrame([row_dict])
+        if mode == "sensor":
+            pass
 
-        ## save it
-        print("Saving aperiodic values ...")
-        csv_fname = subject_dir / f"aperiodic_preproc_{preproc_level}.csv"
-        df_aperiodic.to_csv(csv_fname)
-        del df_aperiodic
+        if mode == "source":
+            print("Computing aperiodic values ...")
+            fmin, fmax = 1, 40
+            ep_psds, freqs = psd_array_multitaper(label_ts, epochs.info["sfreq"], fmin, fmax)
+            avg_psd = ep_psds.mean(axis=0)
+            fm = FOOOF()
+            row_dict = {}
+            for lb_idx, lb_name in enumerate(lb_names):
+                print(f"Processing label {lb_idx + 1} / {len(lb_names)} ...")
+                fm.fit(freqs=freqs, power_spectrum=avg_psd[lb_idx], freq_range=[fmin, fmax])
+                offset, exponent = fm.aperiodic_params_
+                row_dict[f'{lb_name}_offset'] = offset
+                row_dict[f'{lb_name}_exponent'] = exponent
+            df_aperiodic = pd.DataFrame([row_dict])
+
+            ## save it
+            print("Saving aperiodic values ...")
+            csv_fname = subject_dir / f"aperiodic_preproc_{preproc_level}.csv"
+            df_aperiodic.to_csv(csv_fname)
+            del df_aperiodic
 
     ## reduce size
     for csv_mod in ["power", "conn", "aperiodic"]:
