@@ -18,6 +18,25 @@ from mne_icalabel import label_components
 from autoreject import AutoReject
 set_log_level("Error")
 
+"""
+EEG preprocessing pipeline for multi-site BIDS datasets.
+
+This script implements a standardized EEG preprocessing workflow for resting-
+state data acquired across multiple sites. Site-specific acquisition parameters
+(e.g., channel layouts, montages, auxiliary channels, and event annotations)
+are handled automatically based on subject identifiers.
+
+The pipeline includes channel selection and montage alignment, site-specific
+annotation handling, temporal cropping, band-pass filtering, resampling,
+average re-referencing, fixed-length epoching, automated artifact rejection
+(AutoReject), and ICA-based artifact removal using ICLabel. Intermediate
+preprocessing stages are saved, and an MNE report is generated to document
+data quality, rejection statistics, and ICA cleaning decisions.
+
+The resulting epoched datasets are suitable for downstream connectivity,
+spectral, and network-level analyses.
+"""
+
 def preprocess(subject_id, bids_root):
 
     site_map = {

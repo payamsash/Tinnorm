@@ -28,6 +28,26 @@ from fooof import FOOOF
 
 set_log_level("ERROR")
 
+"""
+Feature extraction from preprocessed EEG data in BIDS format.
+
+This script computes sensor- and source-level features from preprocessed
+resting-state EEG epochs stored in a BIDS-compliant structure. Depending on
+the selected mode, features are extracted either at the sensor level or after
+source reconstruction using an fsaverage template and cortical parcellations.
+
+Computed features include:
+- Band-limited spectral power across predefined frequency bands
+- Time-resolved functional connectivity metrics (PLI, PLV, coherence)
+- Aperiodic (1/f) spectral parameters estimated using FOOOF
+
+Source-level analysis employs minimum-norm inverse solutions and atlas-based
+label time series extraction. Outputs are saved as compressed CSV files to
+reduce storage requirements and facilitate large-scale downstream analyses,
+such as machine learning or normative modeling.
+
+"""
+
 def compute_features(
                     subject_id,
                     bids_root,

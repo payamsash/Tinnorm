@@ -7,6 +7,19 @@ from tqdm import tqdm
 from mne import set_log_level
 set_log_level("Error")
 
+"""
+Convert multi-site EEG datasets to BIDS format.
+
+This script standardizes EEG data collected from multiple sites by converting
+various native file formats (e.g., BrainVision, FIF, BDF, CNT) into a unified
+BIDS-compliant structure using MNE-BIDS. Site-specific handling is implemented
+to accommodate differences in file formats, naming conventions, and sampling
+rates, with optional resampling applied where required.
+
+The resulting BIDS dataset enables consistent and reproducible downstream
+EEG analysis across cohorts.
+"""
+
 def convert_to_bids():
     root_dir = Path("/Volumes/Extreme_SSD/payam_data/Tide_data")
     bids_dir = root_dir / "BIDS"
