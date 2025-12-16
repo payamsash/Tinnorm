@@ -68,7 +68,10 @@ def compute_features(
 
     ## read labels
     if mode == "sensor":
+        epochs.pick_types(eeg=True)
         epochs_int = epochs.copy().interpolate_to(standard_montage)
+        epochs_ts = epochs_int.get_data(picks="eeg")
+        ch_names = epochs_int.info["ch_names"]
     
     if mode == "source":
         if atlas == "aparc":
@@ -129,7 +132,6 @@ def compute_features(
     if compute_power:
         if mode == "sensor":
             print("Computing band powers ...")
-            chs = epochs_int.info["ch_names"]
             n_epochs, n_chs, n_times = epochs_int.get_data(picks="eeg").shape
             psd_chs, freqs = epochs_int.compute_psd(
                                                     fmin=freq_bands["delta"][0],
@@ -144,7 +146,7 @@ def compute_features(
                 band_mask = (freqs >= min_freq) & (freqs <= max_freq)
                 band_powers = np.trapz(psd_chs[:, band_mask], freqs[band_mask], axis=-1) # ????
                 chs_power.append(band_powers.reshape(n_epochs, n_chs))
-                columns += chs
+                columns += ch_names
 
             chs_power = np.concatenate(chs_power, axis=1)
             df_power_chs = pd.DataFrame(chs_power, columns=columns)
@@ -181,79 +183,102 @@ def compute_features(
         
     ## compute connectivity (pli, plv, coh)
     if compute_conn:
+
         if mode == "sensor":
-            pass
+            data_ts = epochs_ts
+            names = ch_names
+        elif mode == "source":
+            data_ts = label_ts
+            names = lb_names
+        else:
+            raise ValueError("mode must be 'sensor' or 'source'")
 
-        if mode == "source":
-            i_lower, j_lower = np.tril_indices_from(np.zeros(shape=(label_ts.shape[1], label_ts.shape[1])), k=-1)
-            columns = []
-            freq_cons = []
-            for key, value in freq_bands.items(): 
-                if key == "delta":
-                    n_cycles = value[1] / 6
-                else:
-                    n_cycles = 7
-                
-                for con_method in con_methods:
-                    print(f"Computing {con_method} connectivity values for {key} frange...")
-                    con = spectral_connectivity_time(
-                                                    label_ts,
-                                                    freqs=np.arange(value[0], value[1], 5),
-                                                    method=con_method,
-                                                    average=False,
-                                                    sfreq=epochs.info["sfreq"],
-                                                    mode="cwt_morlet",
-                                                    fmin=value[0],
-                                                    fmax=value[1],
-                                                    faverage=True,
-                                                    n_cycles=n_cycles
-                                                    )
-                    con_matrix = np.squeeze(con.get_data(output="dense")) # n_epochs * n_labels * n_labels
+        n_nodes = data_ts.shape[1]
+        i_lower, j_lower = np.tril_indices(n_nodes, k=-1)
 
-                    cons = []
-                    for ep_con in con_matrix:
-                        ep_con_value = ep_con[i_lower, j_lower]
-                        cons.append(ep_con_value)
-                    cons = np.array(cons)
-                    freq_cons.append(cons)
+        columns = []
+        freq_cons = []
 
-                    con_labels = [f"{lb_names[i]}_vs_{lb_names[j]}_{key}_{con_method}" for i, j in zip(i_lower, j_lower)]
-                    columns += con_labels
+        for key, value in freq_bands.items():
+            n_cycles = value[1] / 6 if key == "delta" else 7
 
-            freq_cons = np.concatenate(freq_cons, axis=-1)
-            df_conn = pd.DataFrame(freq_cons, columns=columns).T
+            for con_method in con_methods:
+                print(f"Computing {con_method} connectivity values for {key} frange...")
 
-            ## save it
-            print("Saving connectivity values ...")
-            csv_fname = subject_dir / f"conn_preproc_{preproc_level}.csv"
-            df_conn.to_csv(csv_fname)
-            del df_conn
+                con = spectral_connectivity_time(
+                    data_ts,
+                    freqs=np.arange(value[0], value[1], 5),
+                    method=con_method,
+                    average=False,
+                    sfreq=epochs.info["sfreq"],
+                    mode="cwt_morlet",
+                    fmin=value[0],
+                    fmax=value[1],
+                    faverage=True,
+                    n_cycles=n_cycles,
+                )
+
+                con_matrix = np.squeeze(con.get_data(output="dense"))  # n_epochs × n_nodes × n_nodes
+
+                cons = []
+                for ep_con in con_matrix:
+                    cons.append(ep_con[i_lower, j_lower])
+
+                freq_cons.append(np.array(cons))
+
+                columns += [
+                    f"{names[i]}_vs_{names[j]}_{key}_{con_method}"
+                    for i, j in zip(i_lower, j_lower)
+                ]
+
+        freq_cons = np.concatenate(freq_cons, axis=-1)
+        df_conn = pd.DataFrame(freq_cons, columns=columns).T
+
+        print("Saving connectivity values ...")
+        df_conn.to_csv(subject_dir / f"conn_{mode}_preproc_{preproc_level}.csv")
+        del df_conn
 
     # compute aperiodic param per whole recording
     if compute_aperiodic:
+
         if mode == "sensor":
-            pass
+            data_ts = epochs_ts
+            names = ch_names
+        elif mode == "source":
+            data_ts = label_ts
+            names = lb_names
+        else:
+            raise ValueError("mode must be 'sensor' or 'source'")
 
-        if mode == "source":
-            print("Computing aperiodic values ...")
-            fmin, fmax = 1, 40
-            ep_psds, freqs = psd_array_multitaper(label_ts, epochs.info["sfreq"], fmin, fmax)
-            avg_psd = ep_psds.mean(axis=0)
-            fm = FOOOF()
-            row_dict = {}
-            for lb_idx, lb_name in enumerate(lb_names):
-                print(f"Processing label {lb_idx + 1} / {len(lb_names)} ...")
-                fm.fit(freqs=freqs, power_spectrum=avg_psd[lb_idx], freq_range=[fmin, fmax])
-                offset, exponent = fm.aperiodic_params_
-                row_dict[f'{lb_name}_offset'] = offset
-                row_dict[f'{lb_name}_exponent'] = exponent
-            df_aperiodic = pd.DataFrame([row_dict])
+        print("Computing aperiodic values ...")
 
-            ## save it
-            print("Saving aperiodic values ...")
-            csv_fname = subject_dir / f"aperiodic_preproc_{preproc_level}.csv"
-            df_aperiodic.to_csv(csv_fname)
-            del df_aperiodic
+        fmin, fmax = 1, 40
+        ep_psds, freqs = psd_array_multitaper(
+            data_ts, epochs.info["sfreq"], fmin, fmax
+        )
+
+        avg_psd = ep_psds.mean(axis=0)
+        fm = FOOOF()
+        row_dict = {}
+
+        for idx, name in enumerate(names):
+            print(f"Processing {mode} {idx + 1} / {len(names)} ...")
+            fm.fit(
+                freqs=freqs,
+                power_spectrum=avg_psd[idx],
+                freq_range=[fmin, fmax],
+            )
+            offset, exponent = fm.aperiodic_params_
+            row_dict[f"{name}_offset"] = offset
+            row_dict[f"{name}_exponent"] = exponent
+
+        df_aperiodic = pd.DataFrame([row_dict])
+
+        ## save it
+        print("Saving aperiodic values ...")
+        csv_fname = subject_dir / f"aperiodic_{mode}_preproc_{preproc_level}.csv"
+        df_aperiodic.to_csv(csv_fname)
+        del df_aperiodic
 
     ## reduce size
     for csv_mod in ["power", "conn", "aperiodic"]:
@@ -293,6 +318,7 @@ if __name__ == "__main__":
                                     preproc_level,
                                     freq_bands,
                                     con_methods,
+                                    mode="sensor",
                                     atlas="aparc",
                                     compute_power=True,
                                     compute_conn=True,
