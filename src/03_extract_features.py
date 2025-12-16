@@ -14,6 +14,7 @@ from mne import (
     make_forward_solution,
     make_ad_hoc_cov,
 )
+from mne.channels import make_standard_montage
 from mne.datasets import fetch_fsaverage
 from mne.minimum_norm import (
     read_inverse_operator,
@@ -52,6 +53,7 @@ def compute_features(
         }
 
     site = site_map.get(str(subject_id)[0], "unknown")
+    standard_montage = make_standard_montage("easycap-M1")
     
     if mode == "source":
         inv_dir = bids_root.parent / "invs"
@@ -65,6 +67,9 @@ def compute_features(
     epochs.set_eeg_reference("average", projection=True)
 
     ## read labels
+    if mode == "sensor":
+        epochs_int = epochs.copy().interpolate_to(standard_montage)
+    
     if mode == "source":
         if atlas == "aparc":
             labels = read_labels_from_annot(subject="fsaverage", subjects_dir=None, parc=atlas)[:-1]
@@ -120,10 +125,35 @@ def compute_features(
         label_ts = np.array(label_ts)
         lb_names = [lb.name for lb in labels]
 
-    ## compute power in labels
+    ## compute power in channels/labels
     if compute_power:
         if mode == "sensor":
-            pass
+            print("Computing band powers ...")
+            chs = epochs_int.info["ch_names"]
+            n_epochs, n_chs, n_times = epochs_int.get_data(picks="eeg").shape
+            psd_chs, freqs = epochs_int.compute_psd(
+                                                    fmin=freq_bands["delta"][0],
+                                                    fmax=freq_bands["gamma"][1]
+                                                    ).get_data(return_freqs=True)
+            
+            ## mask to get each
+            columns = []
+            chs_power = []
+            for key, value in freq_bands.items():
+                min_freq, max_freq = list(value)
+                band_mask = (freqs >= min_freq) & (freqs <= max_freq)
+                band_powers = np.trapz(psd_chs[:, band_mask], freqs[band_mask], axis=-1) # ????
+                chs_power.append(band_powers.reshape(n_epochs, n_chs))
+                columns += chs
+
+            chs_power = np.concatenate(chs_power, axis=1)
+            df_power_chs = pd.DataFrame(chs_power, columns=columns)
+
+            ## save it
+            print("Saving band powers ...")
+            csv_fname = subject_dir / f"power_chs_preproc_{preproc_level}.csv"
+            df_power_chs.to_csv(csv_fname)
+            del df_power_chs
 
         if mode == "source":
             print("Computing band powers ...")
@@ -141,13 +171,13 @@ def compute_features(
                 columns += [f"{lb.name}_{key}" for lb in labels]
 
             labels_power = np.concatenate(labels_power, axis=1)
-            df_power = pd.DataFrame(labels_power, columns=columns)
+            df_power_labels = pd.DataFrame(labels_power, columns=columns)
 
             ## save it
             print("Saving band powers ...")
-            csv_fname = subject_dir / f"power_preproc_{preproc_level}.csv"
-            df_power.to_csv(csv_fname)
-            del df_power
+            csv_fname = subject_dir / f"power_labels_preproc_{preproc_level}.csv"
+            df_power_labels.to_csv(csv_fname)
+            del df_power_labels
         
     ## compute connectivity (pli, plv, coh)
     if compute_conn:
@@ -257,14 +287,14 @@ if __name__ == "__main__":
         for preproc_level in preproc_levels: 
             if (bids_root / f"sub-{subject_id}" / "ses-01" / "eeg" / "preproc_3-epo.fif").is_file():
                 print(f"Working on subject {subject_id} and preproc level {preproc_level} ...")
-                compute_source_features(
-                                        subject_id,
-                                        bids_root,
-                                        preproc_level,
-                                        freq_bands,
-                                        con_methods,
-                                        atlas="aparc",
-                                        compute_power=True,
-                                        compute_conn=True,
-                                        compute_aperiodic=True
-                                        )
+                compute_features(
+                                    subject_id,
+                                    bids_root,
+                                    preproc_level,
+                                    freq_bands,
+                                    con_methods,
+                                    atlas="aparc",
+                                    compute_power=True,
+                                    compute_conn=True,
+                                    compute_aperiodic=True
+                                    )
