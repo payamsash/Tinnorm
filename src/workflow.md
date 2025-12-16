@@ -10,7 +10,7 @@
    - connectivity (per epoch -> per subject)
    - aperiodic (offset + exponent) (per subject)
 
-4) Site Diagnosis
+4) Site Diagnosis (skip)
    - Compute per-feature percent variance explained by Site
    - PCA/UMAP of feature matrixes colored by site
 
