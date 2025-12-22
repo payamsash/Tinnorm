@@ -97,4 +97,4 @@ for sub_id in tqdm(subjects_dict.keys()):
     tide_id += 1
 
 df = pd.DataFrame(mapping)
-df.to_csv("ant_to_tide.csv")
+df.to_csv("../material/ant_to_tide.csv")
