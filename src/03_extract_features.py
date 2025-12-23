@@ -173,7 +173,7 @@ def compute_features(
 
             ## save it
             print("Saving band powers ...")
-            csv_fname = subject_dir / f"power_chs_preproc_{preproc_level}.csv"
+            csv_fname = subject_dir / f"power_{mode}_preproc_{preproc_level}.csv"
             df_power_chs.to_csv(csv_fname)
             del df_power_chs
 
@@ -197,7 +197,7 @@ def compute_features(
 
             ## save it
             print("Saving band powers ...")
-            csv_fname = subject_dir / f"power_labels_preproc_{preproc_level}.csv"
+            csv_fname = subject_dir / f"power_{mode}_preproc_{preproc_level}.csv"
             df_power_labels.to_csv(csv_fname)
             del df_power_labels
         
@@ -302,7 +302,7 @@ def compute_features(
 
     ## reduce size
     for csv_mod in ["power", "conn", "aperiodic"]:
-        csv_fname = subject_dir / f"{csv_mod}_preproc_{preproc_level}.csv"
+        csv_fname = subject_dir / f"{csv_mod}_{mode}_preproc_{preproc_level}.csv"
         if csv_fname.is_file():
             with zipfile.ZipFile(csv_fname.with_suffix(".zip"), "w", zipfile.ZIP_DEFLATED) as zipf:
                 zipf.write(csv_fname, os.path.basename(csv_fname))
