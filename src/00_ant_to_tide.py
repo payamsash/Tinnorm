@@ -97,4 +97,18 @@ for sub_id in tqdm(subjects_dict.keys()):
     tide_id += 1
 
 df = pd.DataFrame(mapping)
-df.to_csv("../material/ant_to_tide.csv")
+wide_df = (
+            df
+            .drop_duplicates(subset=["antinomics_id", "tide_id", "paradigm"])
+            .assign(exists=True)
+            .pivot_table(
+                index=["antinomics_id", "tide_id"],
+                columns="paradigm",
+                values="exists",
+                fill_value=False,
+                aggfunc="any",
+            )
+            .reset_index()
+        )
+wide_df.sort_values(by="tide_id", inplace=True)
+wide_df.to_csv("../material/ant_to_tide.csv")
