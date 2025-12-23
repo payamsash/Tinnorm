@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import numpy as np
-import mne
 from mne import (
     Annotations,
     Report,
@@ -113,27 +112,31 @@ def preprocess(subject_id, bids_root):
 
     ## annotations
     if site == "zuerich":
-        if subject_id in ["70006", "70056", "70059"]:
-            ec_event_id = 'Stimulus/S  4'
-        else:
-            ec_event_id = 'Stimulus/S  5'
 
+        # if subject_id in ["70049", "70053", "70054", "70055"]: # triggers not saved
+        #     continue
+        # if subject_id in ["70006", "70056", "70059"]:
+        #     eo_event_id = 'Stimulus/S  4'
+        # else:
+        #     eo_event_id = 'Stimulus/S  5'
+
+        eo_event_id = 'Stimulus/S  5'
         events, event_ids = events_from_annotations(raw)
-        event_key = event_ids[ec_event_id]
-        events_ec = events[events[:, 2] == event_key]
+        event_key = event_ids[eo_event_id]
+        events_eo = events[events[:, 2] == event_key]
 
-        if subject_id == "70011": # missing last trigger
-            diffs = np.diff(events_ec[:, 0])
+        if subject_id == "70012": # missing last trigger
+            diffs = np.diff(events_eo[:, 0])
             mean_diff = int(np.round(np.mean(diffs)))
-            new_row = np.array([[events_ec[-1, 0] + mean_diff, 0, 5]])
-            events_ec = np.vstack([events_ec, new_row])
+            new_row = np.array([[events_eo[-1, 0] + mean_diff, 0, 5]])
+            events_eo = np.vstack([events_eo, new_row])
 
-        if len(events_ec) != 5 and subject_id != "70048":
-            raise ValueError(f"number close eye events should be 5, got {len(events_ec)} instead.") 
+        if len(events_eo) != 5 and subject_id != "70050":
+            raise ValueError(f"number close eye events should be 5, got {len(events_eo)} instead.") 
 
-        onsets = (events_ec[:, 0] + zurich_cutoff * raw.info["sfreq"]) / raw.info["sfreq"]
+        onsets = (events_eo[:, 0] + zurich_cutoff * raw.info["sfreq"]) / raw.info["sfreq"]
         duration = (60 - 2 * zurich_cutoff) * np.ones(shape=len(onsets))
-        annots = Annotations(onsets, duration, description="ec")
+        annots = Annotations(onsets, duration, description="eo")
         raw.set_annotations(annots)
         raw = concatenate_raws(raw.crop_by_annotations())
     
