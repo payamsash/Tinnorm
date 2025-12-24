@@ -4,7 +4,6 @@ import zipfile
 
 import numpy as np
 import pandas as pd
-from scipy.signal import welch
 
 from mne import (
     set_log_level,
@@ -76,7 +75,7 @@ def compute_features(
     standard_montage = make_standard_montage("easycap-M1")
 
     ## read epochs
-    subject_dir = bids_root / f"sub-{subject_id}"  # / "ses-01" / "eeg" add it when in cloud
+    subject_dir = bids_root / f"sub-{subject_id}" / "ses-01" / "eeg"
     epochs_fname = subject_dir / f"preproc_{preproc_level}-epo.fif"
     epochs = read_epochs(epochs_fname, preload=True)
     epochs.set_eeg_reference("average", projection=True)
@@ -203,7 +202,7 @@ def compute_features(
 
         ## save it
         print("Saving band powers in sensor space ...")
-        csv_fname = subject_dir / f"power_{mode}_preproc_{preproc_level}.csv"
+        csv_fname = features_dir / f"sub-{subject_id}_power_{mode}_preproc_{preproc_level}.csv"
         df_power.to_csv(csv_fname)
         del df_power
         
@@ -261,7 +260,8 @@ def compute_features(
         df_conn = pd.DataFrame(freq_cons, columns=columns).T
 
         print("Saving connectivity values ...")
-        df_conn.to_csv(subject_dir / f"conn_{mode}_preproc_{preproc_level}.csv")
+        csv_fname = features_dir / f"sub-{subject_id}_conn_{mode}_preproc_{preproc_level}.csv"
+        df_conn.to_csv(csv_fname)
         del df_conn
 
     # compute aperiodic param per whole recording
@@ -302,13 +302,14 @@ def compute_features(
 
         ## save it
         print("Saving aperiodic values ...")
-        csv_fname = subject_dir / f"aperiodic_{mode}_preproc_{preproc_level}.csv"
+        
+        csv_fname = features_dir / f"sub-{subject_id}_aperiodic_{mode}_preproc_{preproc_level}.csv"
         df_aperiodic.to_csv(csv_fname)
         del df_aperiodic
 
     ## reduce size
     for csv_mod in ["power", "conn", "aperiodic"]:
-        csv_fname = subject_dir / f"{csv_mod}_{mode}_preproc_{preproc_level}.csv"
+        csv_fname = features_dir / f"sub-{subject_id}_{csv_mod}_{mode}_preproc_{preproc_level}.csv"
         if csv_fname.is_file():
             with zipfile.ZipFile(csv_fname.with_suffix(".zip"), "w", zipfile.ZIP_DEFLATED) as zipf:
                 zipf.write(csv_fname, os.path.basename(csv_fname))
@@ -317,9 +318,11 @@ def compute_features(
 
 if __name__ == "__main__":
     bids_root = Path("/home/ubuntu/volume/Tinnorm/BIDS")
+    features_dir = Path("/home/ubuntu/volume/Tinnorm/features")
     subject_ids = sorted([f.name[4:] for f in bids_root.iterdir() if f.is_dir()])
     preproc_levels = [1, 2, 3]
     con_methods = ["pli", "plv", "coh"]
+    modes = ["sensor", "source"]
     freq_bands = {
                 "delta": [1, 6],
                 "theta": [6.5, 8.5],
@@ -335,18 +338,42 @@ if __name__ == "__main__":
 
     ## running on all subjects and preproc levels
     for subject_id in subject_ids:
-        for preproc_level in preproc_levels: 
-            if (bids_root / f"sub-{subject_id}" / "ses-01" / "eeg" / "preproc_3-epo.fif").is_file():
-                print(f"Working on subject {subject_id} and preproc level {preproc_level} ...")
+        for preproc_level in preproc_levels:
+
+            epo_fname = (
+                bids_root
+                / f"sub-{subject_id}"
+                / "ses-01"
+                / "eeg"
+                / f"preproc_{preproc_level}-epo.fif"
+            )
+
+            if not epo_fname.is_file():
+                continue
+
+            print(f"Working on subject {subject_id}, preproc level {preproc_level} ...")
+            for mode in modes:
+
+                power_file = features_dir / f"sub-{subject_id}_power_{mode}_preproc_{preproc_level}.zip"
+                conn_file = features_dir / f"sub-{subject_id}_conn_{mode}_preproc_{preproc_level}.zip"
+                aperiodic_file = features_dir / f"sub-{subject_id}_aperiodic_{mode}_preproc_{preproc_level}.zip"
+
+                compute_power = not power_file.is_file()
+                compute_conn = not conn_file.is_file()
+                compute_aperiodic = not aperiodic_file.is_file()
+
+                if not (compute_power or compute_conn or compute_aperiodic):
+                    continue
+
                 compute_features(
-                                    subject_id,
-                                    bids_root,
-                                    preproc_level,
-                                    freq_bands,
-                                    con_methods,
-                                    mode="sensor",
-                                    atlas="aparc",
-                                    compute_power=True,
-                                    compute_conn=True,
-                                    compute_aperiodic=True
-                                    )
+                    subject_id=subject_id,
+                    bids_root=bids_root,
+                    preproc_level=preproc_level,
+                    freq_bands=freq_bands,
+                    con_methods=con_methods,
+                    mode=mode,
+                    atlas="aparc",
+                    compute_power=compute_power,
+                    compute_conn=compute_conn,
+                    compute_aperiodic=compute_aperiodic,
+                )
