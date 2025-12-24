@@ -152,7 +152,6 @@ def compute_features(
     if compute_power:
         if mode == "sensor":
             print("Computing band powers in sensor space ...")
-            n_epochs, n_chs, n_times = epochs_ts.shape
             psd_chs, freqs = epochs_int.compute_psd(
                                                     fmin=freq_bands["delta"][0],
                                                     fmax=freq_bands["gamma"][1]
@@ -172,37 +171,41 @@ def compute_features(
                 columns.extend([f"{ch}_{band_name}" for ch in ch_names])
 
             chs_power = np.concatenate(all_band_powers, axis=1)
-            df_power_chs = pd.DataFrame(chs_power, columns=columns)
-
-            ## save it
-            print("Saving band powers in sensor space ...")
-            csv_fname = subject_dir / f"power_{mode}_preproc_{preproc_level}.csv"
-            df_power_chs.to_csv(csv_fname)
-            del df_power_chs
+            df_power = pd.DataFrame(chs_power, columns=columns)
 
         if mode == "source":
             print("Computing band powers ...")
             n_epochs, n_labels, n_times = label_ts.shape
             reshaped_data = label_ts.reshape(-1, n_times)
-            freqs, psd = welch(reshaped_data, epochs.info["sfreq"], axis=-1, nperseg=min(256, n_times))
 
+            psd, freqs = psd_array_multitaper(
+                                            reshaped_data,
+                                            sfreq=epochs.info["sfreq"],
+                                            fmin=freq_bands["delta"][0],
+                                            fmax=freq_bands["gamma"][1]
+                                            )
             columns = []
             labels_power = []
-            for key, value in freq_bands.items():
-                min_freq, max_freq = list(value)
+            for band_name, (min_freq, max_freq) in freq_bands.items():
                 band_mask = (freqs >= min_freq) & (freqs <= max_freq)
-                band_powers = np.trapz(psd[:, band_mask], freqs[band_mask], axis=-1)
+
+                # integrate PSD over band
+                band_powers = np.trapz(
+                                        psd[:, band_mask],
+                                        freqs[band_mask],
+                                        axis=-1
+                                    )
                 labels_power.append(band_powers.reshape(n_epochs, n_labels))
-                columns += [f"{lb.name}_{key}" for lb in labels]
+                columns.extend([f"{lb.name}_{band_name}" for lb in labels])
 
             labels_power = np.concatenate(labels_power, axis=1)
-            df_power_labels = pd.DataFrame(labels_power, columns=columns)
+            df_power = pd.DataFrame(labels_power, columns=columns)
 
-            ## save it
-            print("Saving band powers ...")
-            csv_fname = subject_dir / f"power_{mode}_preproc_{preproc_level}.csv"
-            df_power_labels.to_csv(csv_fname)
-            del df_power_labels
+        ## save it
+        print("Saving band powers in sensor space ...")
+        csv_fname = subject_dir / f"power_{mode}_preproc_{preproc_level}.csv"
+        df_power.to_csv(csv_fname)
+        del df_power
         
     ## compute connectivity (pli, plv, coh)
     if compute_conn:
