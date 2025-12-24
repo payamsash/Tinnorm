@@ -74,26 +74,26 @@ def compute_features(
 
     site = site_map.get(str(subject_id)[0], "unknown")
     standard_montage = make_standard_montage("easycap-M1")
-    
-    if mode == "source":
-        inv_dir = bids_root.parent / "invs"
-        os.makedirs(inv_dir, exist_ok=True)
-        inv_fname = inv_dir / f"{site}-inv.fif"
 
     ## read epochs
     subject_dir = bids_root / f"sub-{subject_id}"  # / "ses-01" / "eeg" add it when in cloud
     epochs_fname = subject_dir / f"preproc_{preproc_level}-epo.fif"
     epochs = read_epochs(epochs_fname, preload=True)
     epochs.set_eeg_reference("average", projection=True)
-
-    ## read labels
+    
+    ## read channels
     if mode == "sensor":
         epochs.pick_types(eeg=True)
         epochs_int = epochs.copy().interpolate_to(standard_montage)
         epochs_ts = epochs_int.get_data(picks="eeg")
         ch_names = epochs_int.info["ch_names"]
     
+    ## read labels
     if mode == "source":
+        inv_dir = bids_root.parent / "invs"
+        os.makedirs(inv_dir, exist_ok=True)
+        inv_fname = inv_dir / f"{site}-inv.fif"
+
         if atlas == "aparc":
             labels = read_labels_from_annot(subject="fsaverage", subjects_dir=None, parc=atlas)[:-1]
         if atlas == "aparc.a2009s":
@@ -151,8 +151,8 @@ def compute_features(
     ## compute power in channels/labels
     if compute_power:
         if mode == "sensor":
-            print("Computing band powers ...")
-            n_epochs, n_chs, n_times = epochs_int.get_data(picks="eeg").shape
+            print("Computing band powers in sensor space ...")
+            n_epochs, n_chs, n_times = epochs_ts.shape
             psd_chs, freqs = epochs_int.compute_psd(
                                                     fmin=freq_bands["delta"][0],
                                                     fmax=freq_bands["gamma"][1]
@@ -160,19 +160,22 @@ def compute_features(
             
             ## mask to get each
             columns = []
-            chs_power = []
-            for key, value in freq_bands.items():
-                min_freq, max_freq = list(value)
+            all_band_powers = []
+            for band_name, (min_freq, max_freq) in freq_bands.items():
                 band_mask = (freqs >= min_freq) & (freqs <= max_freq)
-                band_powers = np.trapz(psd_chs[:, band_mask], freqs[band_mask], axis=-1) # ????
-                chs_power.append(band_powers.reshape(n_epochs, n_chs))
-                columns += ch_names
+                band_powers = np.trapz(
+                    psd_chs[:, :, band_mask],
+                    freqs[band_mask],
+                    axis=-1
+                )
+                all_band_powers.append(band_powers)
+                columns.extend([f"{ch}_{band_name}" for ch in ch_names])
 
-            chs_power = np.concatenate(chs_power, axis=1)
+            chs_power = np.concatenate(all_band_powers, axis=1)
             df_power_chs = pd.DataFrame(chs_power, columns=columns)
 
             ## save it
-            print("Saving band powers ...")
+            print("Saving band powers in sensor space ...")
             csv_fname = subject_dir / f"power_{mode}_preproc_{preproc_level}.csv"
             df_power_chs.to_csv(csv_fname)
             del df_power_chs
