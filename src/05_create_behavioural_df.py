@@ -67,10 +67,10 @@ audio_cols = [
             "PTA_TIDE_ALE",
             "PTA_HF_ARE",
             "PTA_HF_ALE",
-            "RE_TinFreq",
-            "RE_TinLoudness",
-            "LE_TinFreq",
-            "LE_TinLoudness"
+            # "RE_TinFreq", # for now remove them
+            # "RE_TinLoudness",
+            # "LE_TinFreq",
+            # "LE_TinLoudness"
         ]
 avg_pairs = {
             "PTA4_mean": ["PTA4_ARE", "PTA4_ALE"],
@@ -94,6 +94,22 @@ for site in site_map.values():
     df_a = pd.read_csv(audio_fname, sep=None, engine="python", index_col=None, encoding="utf-8-sig")
 
     df_q["site"] = site
+
+    # some site spcific fixes
+    if site_code == "ILL":
+        df_q.rename(columns={"Subject ID": "study_id",
+                            "esit_a2": "intro_gender"}, inplace=True)
+    
+        df_a.rename(columns={"RE_TinFreq(k)": "RE_TinFreq",
+                            "LE_TinFreq(k)": "LE_TinFreq",
+                            "RE_TinLoudness(dBSL)": "RE_TinLoudness"},
+                            inplace=True) # must not be converted but diff scales but both are dBSL
+        df_a[["RE_TinFreq", "LE_TinFreq"]] = df_a[["RE_TinFreq", "LE_TinFreq"]] * 1000
+        
+    if site_code == "REG":
+        df_a.rename(columns={"PT4_HF_ARE": "PTA_HF_ARE",
+                            "PT4_TIDE_ARE": "PTA_TIDE_ARE"},
+                            inplace=True)
 
     missing_quest_cols = set(quest_cols) - set(df_q.columns)
     if missing_quest_cols:
