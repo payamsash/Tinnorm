@@ -22,8 +22,13 @@ def harmonize(
     dfs_list = []
     for fname in tqdm(fnames):
         subject_id = fname.stem[4:9]
-        df_subject = pd.read_csv(fname, index_col=None) 
-        df_subject.drop(columns="Unnamed: 0", inplace=True)
+        df_subject = pd.read_csv(fname, index_col=None)
+            
+        if modality == "conn":
+            df_subject = df_subject.set_index(df_subject.columns[0]).T
+            df_subject.columns.name = None
+        
+        df_subject.drop(columns="Unnamed: 0", inplace=True, errors="ignore")
         df_mean = df_subject.mean(axis=0).to_frame().T # per subject
         df_mean["subject_id"] = subject_id
         dfs_list.append(df_mean)
