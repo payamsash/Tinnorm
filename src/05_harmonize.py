@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import pandas as pd
 from tqdm import tqdm
@@ -19,6 +20,7 @@ def harmonize(
             fnames.append(fname)
 
     ## read and create data matrix
+    print(f"reading the {modality} in {mode} features ...")
     dfs_list = []
     for fname in tqdm(fnames):
         subject_id = fname.stem[4:9]
@@ -53,18 +55,26 @@ def harmonize(
     ## harmonize
     data_matrix = df_merged.iloc[:, :-4].to_numpy()
     df_cov = df_merged[["SITE",	"age",	"sex"]]
-    hm_model, my_data_adj = harmonizationLearn(data_matrix, df_cov, eb=True, seed=0)
+    hm_model, data_adj, s_data = harmonizationLearn(
+                                                    data_matrix,
+                                                    df_cov,
+                                                    eb=True,
+                                                    seed=0,
+                                                    return_s_data=True
+                                                    )
 
     ## replace and save
     column_names = df_merged.columns[:-4]
-    df_hm = pd.DataFrame(my_data_adj, columns=column_names)
-    df_hm = pd.concat([df_hm, df_merged[['SITE', 'subject_id', 'age', 'sex']].reset_index(drop=True)], axis=1)
-    # write saving directory here
+    for data, title in zip([data_adj, s_data], ["hm", "residual"]):
+        df_hm = pd.DataFrame(data, columns=column_names)
+        df_hm = pd.concat([df_hm, df_merged[['SITE', 'subject_id', 'age', 'sex']].reset_index(drop=True)], axis=1)
+        df_hm.to_csv(saving_dir / f"{modality}_{mode}_preproc_{preproc_level}_{title}.csv")
 
 if __name__ == "__main__":
     
     features_dir = Path("/Volumes/G_USZ_ORL$/Research/ANT/tinnorm/features")
-    saving_dir = Path(".")
+    saving_dir = features_dir.parent / "harmonized"
+    os.makedirs(saving_dir, exist_ok=True)
     preproc_level = 2
     mode = "sensor"
     modality = "power"
@@ -76,4 +86,3 @@ if __name__ == "__main__":
                 saving_dir,
                 features_dir
                 )
-    ## add saving path for models and residulas
