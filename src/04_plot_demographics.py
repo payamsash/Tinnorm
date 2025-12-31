@@ -1,3 +1,4 @@
+import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 
@@ -31,3 +32,4 @@ g.set_titles("")
 g.add_legend()
 g.set(yticks=[], ylabel="", xlabel=r"Age")
 g.despine(bottom=True, left=True)
+plt.show()
