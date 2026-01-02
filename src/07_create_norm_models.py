@@ -5,13 +5,13 @@ from pcntoolkit import (
     NormData,
     BLR,
     BsplineBasisFunction,
-    NormativeModel,
-    plot_centiles_advanced
+    NormativeModel
 )
 
-## fix the path
-saving_dir = "."
-df = pd.read_csv('/Volumes/G_USZ_ORL$/Research/ANT/tinnorm/harmonized/power_sensor_preproc_2_hm.csv')
+## making dataframes ready for norm data structure
+random_state = 42
+saving_dir = "." # should be based on modality
+df = pd.read_csv('/Volumes/G_USZ_ORL$/Research/ANT/tinnorm/harmonized/power_sensor_preproc_2_hm.csv') ## fix the path
 df_master = pd.read_csv("../material/master.csv")
 
 df["subject_id"] = df["subject_id"].astype(str)
@@ -24,7 +24,7 @@ df = df.merge(
             )
 df.drop(columns=["Unnamed: 0"], inplace=True, errors="ignore")
 
-## creating a NormData object
+## creating a NormData objects
 kwargs = {
             "covariates": ["age", "sex", "PTA4_mean"],
             "batch_effects": ["SITE"],
@@ -32,12 +32,17 @@ kwargs = {
             "subject_ids": "subject_id"
             }
 
-norm_train = NormData.from_dataframe(name="train",
+norm_train_all = NormData.from_dataframe(name="train_all",
                                     dataframe=df.query('group == 0'),
                                     **kwargs)
-norm_test = NormData.from_dataframe(name="test",
+norm_test_tinnitus = NormData.from_dataframe(name="test_tinnitus",
                                     dataframe=df.query('group == 1'),
                                     **kwargs)
+norm_train_control, norm_test_control \
+                    = norm_train_all.train_test_split(
+                                                        splits=0.8,
+                                                        random_state=random_state
+                                                        )
 
 ## creating and save the norm model
 template_blr = BLR(
@@ -48,15 +53,45 @@ template_blr = BLR(
                     warp_name="warpsinharcsinh"
                     )
 
-model = NormativeModel(
+model_1 = NormativeModel(
                         template_regression_model=template_blr,
                         savemodel=False,
                         evaluate_model=True,
                         saveresults=True,
                         saveplots=False,
-                        save_dir=saving_dir,
+                        save_dir=saving_dir / "for_eval",
                         inscaler="standardize",
                         outscaler="standardize",
                     )
-model.fit_predict(norm_train, norm_test)
-model.save(saving_dir)
+model_1.fit_predict(norm_train_control, norm_test_control)
+# model_1.save(saving_dir / "for_eval")
+
+del model_1
+
+model_2 = NormativeModel(
+                        template_regression_model=template_blr,
+                        savemodel=False,
+                        evaluate_model=True,
+                        saveresults=True,
+                        saveplots=False,
+                        save_dir=saving_dir / "full_model",
+                        inscaler="standardize",
+                        outscaler="standardize",
+                    )
+model_2.fit_predict(norm_train_all, norm_test_tinnitus)
+model_2.save(saving_dir / "full_model")
+
+
+'''
+we will need this for plotting later ...
+plot_centiles_advanced(
+                        model,
+                        centiles=[0.05, 0.5, 0.95],
+                        covariate="age",
+                        batch_effects={"SITE": ["austin", "illinois", "regensburg", "tuebingen"]},
+                        scatter_data=train,
+                        show_other_data=False,
+                        harmonize_data=True,
+                        show_yhat=True
+                        )
+'''
