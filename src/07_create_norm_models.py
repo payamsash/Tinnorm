@@ -1,4 +1,4 @@
-import numpy as np
+from pathlib import Path
 import pandas as pd
 
 from pcntoolkit import (
@@ -10,8 +10,8 @@ from pcntoolkit import (
 
 ## making dataframes ready for norm data structure
 random_state = 42
-saving_dir = "." # should be based on modality
-df = pd.read_csv('/Volumes/G_USZ_ORL$/Research/ANT/tinnorm/harmonized/power_sensor_preproc_2_hm.csv') ## fix the path
+saving_dir = Path("../material/conn") # should be based on modality
+df = pd.read_csv('/Volumes/G_USZ_ORL$/Research/ANT/tinnorm/harmonized/conn_source_preproc_2_pli_hm.csv') ## fix the path
 df_master = pd.read_csv("../material/master.csv")
 
 df["subject_id"] = df["subject_id"].astype(str)
@@ -28,7 +28,7 @@ df.drop(columns=["Unnamed: 0"], inplace=True, errors="ignore")
 kwargs = {
             "covariates": ["age", "sex", "PTA4_mean"],
             "batch_effects": ["SITE"],
-            "response_vars": list(df.columns[:-6]), # [c for c in df.columns[:-6] if c.endswith("alpha_1")]
+            "response_vars": [c for c in df.columns[:-6] if c.endswith("alpha_1_pli")], # list(df.columns[:-6]),
             "subject_ids": "subject_id"
             }
 
@@ -64,7 +64,7 @@ model_1 = NormativeModel(
                         outscaler="standardize",
                     )
 model_1.fit_predict(norm_train_control, norm_test_control)
-# model_1.save(saving_dir / "for_eval")
+model_1.save(saving_dir / "for_eval")
 
 del model_1
 
