@@ -8,6 +8,7 @@ def harmonize(
                 preproc_level,
                 mode,
                 modality,
+                conn_mode,
                 saving_dir,
                 features_dir
                 ):
@@ -29,6 +30,7 @@ def harmonize(
         if modality == "conn":
             df_subject = df_subject.set_index(df_subject.columns[0]).T
             df_subject.columns.name = None
+            df_subject = df_subject.filter(regex=rf'_{conn_mode}$')
         
         df_subject.drop(columns="Unnamed: 0", inplace=True, errors="ignore")
         df_mean = df_subject.mean(axis=0).to_frame().T # per subject
@@ -68,7 +70,11 @@ def harmonize(
     for data, title in zip([data_adj, s_data], ["hm", "residual"]):
         df_hm = pd.DataFrame(data, columns=column_names)
         df_hm = pd.concat([df_hm, df_merged[['SITE', 'subject_id', 'age', 'sex']].reset_index(drop=True)], axis=1)
-        df_hm.to_csv(saving_dir / f"{modality}_{mode}_preproc_{preproc_level}_{title}.csv")
+        if modality == "conn":
+            fname_save = saving_dir / f"{modality}_{mode}_preproc_{preproc_level}_{conn_mode}_{title}.csv"
+        else:
+            fname_save = saving_dir / f"{modality}_{mode}_preproc_{preproc_level}_{title}.csv"
+        df_hm.to_csv(fname_save)
 
 if __name__ == "__main__":
     
@@ -76,13 +82,18 @@ if __name__ == "__main__":
     saving_dir = features_dir.parent / "harmonized"
     os.makedirs(saving_dir, exist_ok=True)
     preproc_level = 2
-    mode = "sensor"
-    modality = "power"
+    mode = "source"
+    modality = "conn"
+    conn_mode = "pli"
     
     harmonize(
                 preproc_level,
                 mode,
                 modality,
+                conn_mode,
                 saving_dir,
                 features_dir
                 )
+    
+    # if not conn_mode is None:
+
