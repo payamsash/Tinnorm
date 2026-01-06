@@ -19,10 +19,10 @@ from sklearn.metrics import (
 def classify(
             modality,
             mode,
-            extra_mode,
-            preproc_level,
+            conn_mode,
             harmonized_dir,
             master_dir,
+            preproc_level=2,
             high_corr_drop=True,
             corr_thr=0.9,
             run_permutation=False,
@@ -130,7 +130,7 @@ if __name__ == "__main__":
 
     modality = "power"
     mode = "sensor"
-    extra_mode = None
+    conn_mode = None
     preproc_level = 2
     harmonized_dir = Path("")
     master_dir = Path("../material/master.csv")
@@ -138,10 +138,10 @@ if __name__ == "__main__":
     classify(
             modality,
             mode,
-            extra_mode,
-            preproc_level,
+            conn_mode,
             harmonized_dir,
             master_dir,
+            preproc_level=2,
             high_corr_drop=True,
             corr_thr=0.9,
             run_permutation=False,
