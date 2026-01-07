@@ -96,18 +96,18 @@ def classify(
     print(classification_report(y, y_pred, digits=3))
     
     ## can RF predict site? (should be chance)
-    rf_site = RandomForestClassifier(
-        n_estimators=300,
-        random_state=random_state,
-        n_jobs=n_jobs
-    )
+    # rf_site = RandomForestClassifier(
+    #     n_estimators=300,
+    #     random_state=random_state,
+    #     n_jobs=n_jobs
+    # )
 
-    site_pred = cross_val_predict(
-        rf_site, X, sites, cv=5
-    )
+    # site_pred = cross_val_predict(
+    #     rf_site, X, sites, cv=5
+    # )
 
-    site_acc = accuracy_score(sites, site_pred)
-    print(f"Site prediction accuracy: {site_acc:.3f}")
+    # site_acc = accuracy_score(sites, site_pred)
+    # print(f"Site prediction accuracy: {site_acc:.3f}")
 
     ## permutation test
     if run_permutation:
