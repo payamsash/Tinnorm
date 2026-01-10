@@ -53,20 +53,20 @@ template_blr = BLR(
                     warp_name="warpsinharcsinh"
                     )
 
-model_1 = NormativeModel(
-                        template_regression_model=template_blr,
-                        savemodel=False,
-                        evaluate_model=True,
-                        saveresults=True,
-                        saveplots=False,
-                        save_dir=saving_dir / "for_eval",
-                        inscaler="standardize",
-                        outscaler="standardize",
-                    )
-model_1.fit_predict(norm_train_control, norm_test_control)
-model_1.save(saving_dir / "for_eval")
+# model_1 = NormativeModel(
+#                         template_regression_model=template_blr,
+#                         savemodel=False,
+#                         evaluate_model=True,
+#                         saveresults=True,
+#                         saveplots=False,
+#                         save_dir=saving_dir / "for_eval",
+#                         inscaler="standardize",
+#                         outscaler="none",
+#                     )
+# model_1.fit_predict(norm_train_control, norm_test_control)
+# model_1.save(saving_dir / "for_eval")
 
-del model_1
+# del model_1
 
 model_2 = NormativeModel(
                         template_regression_model=template_blr,
@@ -76,10 +76,10 @@ model_2 = NormativeModel(
                         saveplots=False,
                         save_dir=saving_dir / "full_model",
                         inscaler="standardize",
-                        outscaler="standardize",
+                        outscaler="none",
                     )
 model_2.fit_predict(norm_train_all, norm_test_tinnitus)
-model_2.save(saving_dir / "full_model")
+# model_2.save(saving_dir / "full_model")
 
 
 '''
