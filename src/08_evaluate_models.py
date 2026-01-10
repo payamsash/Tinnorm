@@ -202,9 +202,3 @@ def plot_brain(
                 ax.axis("off")
 
         return fig
-
-
-## plot connection maps
-
-
-
