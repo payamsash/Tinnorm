@@ -11,18 +11,6 @@ from nilearn.plotting import plot_connectome
 from nichord.chord import plot_chord
 
 
-models_dir = Path("../material")
-mode = "source"
-modality = "power"
-preproc_level = 2 
-conn_mode = None
-train_or_test = "test"
-freq_band = "alpha_1"
-
-## read the results of the model
-fname = models_dir / f"test_model_results" / "results" / f"Z_{train_or_test}.csv" # fix the path
-df = pd.read_csv(fname)
-df = df.filter(regex="_alpha_1")
 
 def plot_brain(
         metric_vals,
@@ -76,6 +64,7 @@ def plot_brain(
                 raise ValueError("metric_vals must be a 1D array.")
 
         vmin, vmax = metric_vals.min(), metric_vals.max()
+        metrics_norm = (metric_vals - vmin) / (vmax - vmin)
 
         # Load labels
         labels = read_labels_from_annot(subject=subject, subjects_dir=subjects_dir)[:-1]
@@ -87,7 +76,7 @@ def plot_brain(
 
         # Color mapping
         colors = np.asarray(palette.as_hex())
-        color_idx = np.round(metric_vals * (len(colors) - 1)).astype(int) ## most important line
+        color_idx = np.round(metrics_norm * (len(colors) - 1)).astype(int) ## most important line
         label_colors = colors[color_idx]
         
         # Brain plotting helper
@@ -218,18 +207,18 @@ def plot_brain_connectome(
                 if label.hemi == 'rh':
                         hemi = 1
         
-        center_vertex = label.center_of_mass(
-                                        subject=subject, 
-                                        restrict_vertices=False, 
+                center_vertex = label.center_of_mass(
+                                                subject=subject, 
+                                                restrict_vertices=False, 
+                                                subjects_dir=subjects_dir
+                                                )
+                mni_pos = vertex_to_mni(
+                                        center_vertex,
+                                        hemis=hemi,
+                                        subject=subject,
                                         subjects_dir=subjects_dir
                                         )
-        mni_pos = vertex_to_mni(
-                                center_vertex,
-                                hemis=hemi,
-                                subject=subject,
-                                subjects_dir=subjects_dir
-                                )
-        node_coords.append(mni_pos)
+                node_coords.append(mni_pos)
 
         node_coords = np.array(node_coords)
         
@@ -275,14 +264,6 @@ def plot_brain_connectome(
                 label_fontsize=18,
                 edge_threshold=edge_threshold
                 )
-
-## w scores on brain power or node strength or regional metric
-plot_brain(
-            metric_vals=df.mean().values,
-            palette=cubehelix_palette(rot=-.2, n_colors=200),
-            surf="inflated"
-            )
-
 
 
 def map_roi_to_yeo7():
@@ -390,3 +371,73 @@ def map_roi_to_yeo7():
                 67: "SMN"    # transversetemporal-rh
         }
         return roi_to_yeo7
+
+
+if __name__ == "__main__":
+        ## needs to be optimised (but lets fix the paths then it will be easy) (blue for power) + (purple for conn)
+
+        ## read necessary files (will be a loop later)
+        models_dir = Path("../material")
+        mode = "source"
+        modality = "power"
+        preproc_level = 2 
+        conn_mode = None # "pli"
+        train_or_test = "test"
+        freq_band = "alpha_1"
+
+        fname = models_dir / f"test_model_results" / "results" / f"Z_{train_or_test}.csv" # fix the path
+        df = pd.read_csv(fname)
+        df = df.filter(regex="_alpha_1")
+
+        ## plot average W scores on brain surface
+        plot_brain(
+                metric_vals=df.mean().values,
+                palette=cubehelix_palette(rot=-.2, n_colors=200),
+                surf="inflated"
+                )
+
+        ## plot extreme number of subjects on brain surface
+        thr = 1.96
+        large_dev = (df > thr).sum(axis=0)
+        small_dev = (df < -thr).sum(axis=0)
+        total_dev = large_dev + small_dev
+
+        df_extreme = pd.DataFrame({
+                                "Large_Dev": large_dev,
+                                "Small_Dev": small_dev,
+                                "Total_Dev": total_dev
+                                }).T
+        plot_brain(
+                metric_vals=df_extreme.to_numpy()[2], # total dev
+                palette=cubehelix_palette(rot=-.2, n_colors=200),
+                surf="inflated"
+                )
+        
+        ## plot average W scores connectome
+        plot_brain_connectome(
+                        metric_vals=df.mean().values,
+                        palette=cubehelix_palette(rot=0.2, n_colors=200)
+                        )
+
+        ## plot extreme number of connectomes
+        thr = 1.96
+        large_dev = (df > thr).sum(axis=0)
+        small_dev = (df < -thr).sum(axis=0)
+        total_dev = large_dev + small_dev
+
+        df_extreme = pd.DataFrame({
+                                "Large_Dev": large_dev,
+                                "Small_Dev": small_dev,
+                                "Total_Dev": total_dev
+                                }).T
+        plot_brain_connectome(
+                        metric_vals=df_extreme.to_numpy()[2], # total dev
+                        palette=cubehelix_palette(rot=0.2, n_colors=200)
+                        )
+
+
+
+        
+
+        
+        
