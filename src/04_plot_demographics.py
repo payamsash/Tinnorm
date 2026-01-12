@@ -1,7 +1,10 @@
+import os
+from pathlib import Path
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 
+tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
 hue = "group" # or sex
 df = pd.read_csv("../material/master.csv")
 df_plot = df[["site", "sex", "age", "group"]]
@@ -17,8 +20,8 @@ pal = [
 xlim = [5, 80]
 bw_adjust = 0.5
 g = sns.FacetGrid(
-    df_plot, row="site", hue=hue, aspect=3.5, height=1.6,
-    palette=pal, row_order=site_names, xlim=xlim
+        df_plot, row="site", hue=hue, aspect=3.5, height=1.6,
+        palette=pal, row_order=site_names, xlim=xlim
 )
 
 g.map(sns.kdeplot, "age", bw_adjust=bw_adjust, clip_on=False, clip=xlim,
@@ -32,4 +35,11 @@ g.set_titles("")
 g.add_legend()
 g.set(yticks=[], ylabel="", xlabel=r"Age")
 g.despine(bottom=True, left=True)
+
+os.makedirs(tinnorm_dir / "plots", exist_ok=True)
+g.figure.savefig(tinnorm_dir / "plots" / "age_distribution.pdf", 
+                format="pdf",       
+                dpi=300,            
+                bbox_inches="tight"
+                )
 plt.show()
