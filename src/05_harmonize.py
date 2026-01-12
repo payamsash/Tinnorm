@@ -56,7 +56,7 @@ def harmonize(
 
     ## harmonize
     if modality == "aperiodic":
-        fname_save = saving_dir / f"{modality}_{space}_preproc_{preproc_level}.csv"
+        fname_save = saving_dir / f"{modality}_{space}_preproc_{preproc_level}_hm.csv"
         df_merged.to_csv(fname_save)
 
     else:
@@ -90,7 +90,7 @@ if __name__ == "__main__":
     
     preproc_levels = [2]
     spaces = ["sensor", "source"][1:]
-    modalities = ["power", "conn", "aperiodic"][1:2]
+    modalities = ["power", "conn", "aperiodic"][2:3]
     conn_modes = ["pli", "plv", "coh"][2:]
 
     for preproc_level in preproc_levels:
