@@ -1,5 +1,6 @@
 from pathlib import Path
 from warnings import warn
+import numpy as np
 import pandas as pd
 
 """
@@ -42,7 +43,7 @@ site_map = {
         "7": "zuerich"
         }
 
-quest_cols = [
+quest_cols = [ # maybe add hearing loss
             "study_id",
             "intro_gender",
             "esit_a1", # age
@@ -52,8 +53,7 @@ quest_cols = [
             "hq_emotional_score",
             "hads_d_score",
             "hads_a_score",
-            "esit_a8_tin", # group
-            "esit_a8_hl", # HL
+            "esit_a17", # group
             "tfi_score",
             "thi_score",
             "psq_score" # stress level
@@ -78,6 +78,7 @@ avg_pairs = {
             "PTA_TIDE_mean": ["PTA_TIDE_ARE", "PTA_TIDE_ALE"]
             }
 
+tinnitus_thr = 4
 dfs = []
 for site in site_map.values():
     site_code = site.upper()[:3]
@@ -143,8 +144,7 @@ mapping = {
             "study_id": "subject_id",
             "intro_gender": "sex",
             "esit_a1":"age",
-            "esit_a8_tin": "group",
-            "esit_a8_hl": "hearing_loss"
+            "esit_a17": "group"
             } 
 df_all.rename(columns=mapping, inplace=True)
 
@@ -159,5 +159,5 @@ cols_required = [
             ]
 
 df_all.dropna(subset=cols_required, inplace=True)
+df_all["group"] = np.where(df_all["group"] <= tinnitus_thr, 1, 0)
 df_all.sort_values(by=["site", "subject_id"], inplace=True)
-df_all.to_csv(behavioural_dir / "master.csv")
