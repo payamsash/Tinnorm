@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import pandas as pd
 
@@ -8,78 +9,123 @@ from pcntoolkit import (
     NormativeModel
 )
 
-## making dataframes ready for norm data structure
-random_state = 42
-saving_dir = Path("../material/conn") # should be based on modality
-df = pd.read_csv('/Volumes/G_USZ_ORL$/Research/ANT/tinnorm/harmonized/conn_source_preproc_2_pli_hm.csv') ## fix the path
-df_master = pd.read_csv("../material/master.csv")
 
-df["subject_id"] = df["subject_id"].astype(str)
-df_master["subject_id"] = df_master["subject_id"].astype(str)
+def run_nm(
+            fname_feature,
+            model_dir,
+            random_state=42
+        ):
 
-df = df.merge(
-            df_master[["subject_id", "group", "PTA4_mean"]],
-            on="subject_id",
-            how="inner"
-            )
-df.drop(columns=["Unnamed: 0"], inplace=True, errors="ignore")
+    ## read and manipulate dfs
+    df = pd.read_csv(fname_feature)
+    df_master = pd.read_csv("../material/master.csv")
 
-## creating a NormData objects
-kwargs = {
-            "covariates": ["age", "sex", "PTA4_mean"],
-            "batch_effects": ["SITE"],
-            "response_vars": [c for c in df.columns[:-6] if c.endswith("alpha_1_pli")], # list(df.columns[:-6]),
-            "subject_ids": "subject_id"
-            }
+    df["subject_id"] = df["subject_id"].astype(str)
+    df_master["subject_id"] = df_master["subject_id"].astype(str)
 
-norm_train_all = NormData.from_dataframe(name="train_all",
-                                    dataframe=df.query('group == 0'),
-                                    **kwargs)
-norm_test_tinnitus = NormData.from_dataframe(name="test_tinnitus",
-                                    dataframe=df.query('group == 1'),
-                                    **kwargs)
-norm_train_control, norm_test_control \
-                    = norm_train_all.train_test_split(
-                                                        splits=0.8,
-                                                        random_state=random_state
-                                                        )
+    df = df.merge(
+                df_master[["subject_id", "group", "PTA4_mean"]],
+                on="subject_id",
+                how="inner"
+                )
+    df.drop(columns=["Unnamed: 0"], inplace=True, errors="ignore")
 
-## creating and save the norm model
-template_blr = BLR(
-                    name="power_source",
-                    basis_function_mean=BsplineBasisFunction(degree=3, nknots=5), 
-                    fixed_effect=True,  
-                    heteroskedastic=True,  
-                    warp_name="warpsinharcsinh"
-                    )
+    ## creating a NormData objects
+    kwargs = {
+                "covariates": ["age", "sex", "PTA4_mean"],
+                "batch_effects": ["SITE"],
+                "response_vars": list(df.columns[:-6]), # [c for c in df.columns[:-6] if c.endswith("alpha_1")], # list(df.columns[:-6]), # [c for c in df.columns[:-6] if c.endswith("alpha_1_pli")]
+                "subject_ids": "subject_id"
+                }
 
-# model_1 = NormativeModel(
-#                         template_regression_model=template_blr,
-#                         savemodel=False,
-#                         evaluate_model=True,
-#                         saveresults=True,
-#                         saveplots=False,
-#                         save_dir=saving_dir / "for_eval",
-#                         inscaler="standardize",
-#                         outscaler="none",
-#                     )
-# model_1.fit_predict(norm_train_control, norm_test_control)
-# model_1.save(saving_dir / "for_eval")
+    norm_train_all = NormData.from_dataframe(
+                                            name="train",
+                                            dataframe=df.query('group == 0'),
+                                            **kwargs
+                                            )
+    norm_test_tinnitus = NormData.from_dataframe(
+                                            name="test",
+                                            dataframe=df.query('group == 1'),
+                                            **kwargs
+                                            )
+    norm_train_control, norm_test_control \
+                        = norm_train_all.train_test_split(
+                                                            splits=0.8,
+                                                            random_state=random_state
+                                                            )
 
-# del model_1
+    ## creating the norm model
+    configs = [
+                {
+                    "save_dir": model_dir / "for_eval",
+                    "train": norm_train_control,
+                    "test": norm_test_control,
+                },
+                {
+                    "save_dir": model_dir / "full_model",
+                    "train": norm_train_all,
+                    "test": norm_test_tinnitus,
+                },
+                ]
 
-model_2 = NormativeModel(
-                        template_regression_model=template_blr,
-                        savemodel=False,
-                        evaluate_model=True,
-                        saveresults=True,
-                        saveplots=False,
-                        save_dir=saving_dir / "full_model",
-                        inscaler="standardize",
-                        outscaler="none",
-                    )
-model_2.fit_predict(norm_train_all, norm_test_tinnitus)
-# model_2.save(saving_dir / "full_model")
+    for cfg in configs:
+        template_blr = BLR(
+            name="payam_blr",
+            basis_function_mean=BsplineBasisFunction(degree=3, nknots=5),
+            fixed_effect=True,
+            heteroskedastic=True,
+            warp_name="warpsinharcsinh"
+        )
+
+        model = NormativeModel(
+            template_regression_model=template_blr,
+            savemodel=False,
+            evaluate_model=True,
+            saveresults=True,
+            saveplots=False,
+            save_dir=cfg["save_dir"],
+            inscaler="standardize",
+            outscaler="none",
+        )
+
+        model.fit_predict(cfg["train"], cfg["test"])
+        # model.save(cfg["save_dir"])
+
+        del model
+        del template_blr
+
+
+if __name__ == "__main__":
+
+    tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
+    hm_dir = tinnorm_dir / "harmonized"
+    models_dir = tinnorm_dir / "models"
+    os.makedirs(models_dir, exist_ok=True)
+    
+    preproc_levels = [2]
+    spaces = ["sensor", "source"][1:]
+    modalities = ["power", "conn", "aperiodic", "global", "regional"][2:3]
+    conn_modes = ["pli", "plv", "coh"][2:]
+
+    for preproc_level in preproc_levels:
+        for space in spaces:
+            for modality in modalities:
+                for conn_mode in conn_modes:
+                    
+                    if modality == ["conn", "global", "regional"]:
+                        fname_featur = hm_dir / f"{modality}_{space}_preproc_{preproc_level}_{conn_mode}_hm.csv"
+                        model_dir = models_dir / f"{modality}_{space}_preproc_{preproc_level}_{conn_mode}"
+
+                    if modality in ["aperiodic", "power"]:
+                        fname_feature = hm_dir / f"{modality}_{space}_preproc_{preproc_level}_hm.csv"
+                        model_dir = models_dir / f"{modality}_{space}_preproc_{preproc_level}"
+
+                    if fname_feature.is_file() and not model_dir.is_dir():
+                        run_nm(
+                                fname_feature,
+                                model_dir,
+                                random_state=42
+                                )
 
 
 '''
