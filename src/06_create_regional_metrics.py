@@ -106,7 +106,7 @@ def compute_regional_metrics(
 
     ## save it in harmonized folder path
     for df, title in zip([df_res, df_nss], ["regional", "global"]):
-        df.to_csv(hm_dir / f"conn_{space}_preproc_{preproc_level}_{title}_{suffix}.csv")
+        df.to_csv(hm_dir / f"{title}_{space}_preproc_{preproc_level}_{conn_mode}_{suffix}.csv")
     
     print("All computations completed and saved successfully!")
 
