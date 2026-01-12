@@ -5,10 +5,11 @@ from mne import read_labels_from_annot
 
 
 def compute_regional_metrics(
-                            mode,
+                            space,
                             conn_mode,
                             preproc_level,
-                            harmonized_dir
+                            suffix,
+                            hm_dir
                             ):
     """
     Compute regional and global (node strength) connectivity metrics
@@ -23,24 +24,26 @@ def compute_regional_metrics(
 
     Parameters
     ----------
-    mode : str
+    space : str
         Connectivity space (e.g., "source" or "sensor").
     conn_mode : str
         Connectivity metric (e.g., "pli", "plv", etc.).
     preproc_level : int
         Preprocessing level identifier.
-    harmonized_dir : pathlib.Path
+    suffix : str
+        harmonized or residual
+    hm_dir : pathlib.Path
         Path to the harmonized data directory.
 
     Outputs
     -------
-    Saves two CSV files in harmonized_dir:
+    Saves two CSV files in hm_dir:
     - Regional (adjacency-weighted) node strengths
     - Global (unweighted) node strengths
     """
 
     print("Loading connectivity and adjacency data...")
-    df_conn = pd.read_csv(harmonized_dir / f"conn_{mode}_preproc_{preproc_level}_{conn_mode}_hm.csv")
+    df_conn = pd.read_csv(hm_dir / f"conn_{space}_preproc_{preproc_level}_{conn_mode}_{suffix}.csv")
     df_adj = pd.read_csv("../material/aparc_adjacency.csv")
     df_adj.drop(columns="Unnamed: 0", inplace=True)
 
@@ -103,20 +106,35 @@ def compute_regional_metrics(
 
     ## save it in harmonized folder path
     for df, title in zip([df_res, df_nss], ["regional", "global"]):
-        df.to_csv(harmonized_dir / f"conn_{mode}_preproc_{preproc_level}_{title}_hm.csv")
+        df.to_csv(hm_dir / f"conn_{space}_preproc_{preproc_level}_{title}_{suffix}.csv")
     
     print("All computations completed and saved successfully!")
 
 
 if __name__ == "__main__":
-    harmonized_dir = Path("/Volumes/G_USZ_ORL$/Research/ANT/tinnorm/harmonized")
-    mode = "source"
-    conn_mode = "pli"
-    preproc_level = 2
+    
+    tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
+    hm_dir = tinnorm_dir / "harmonized"
+    
+    preproc_levels = [2]
+    spaces = ["sensor", "source"][1:]
+    conn_modes = ["pli", "plv", "coh"][2:]
+    suffixes = ["hm", "residual"]
 
-    compute_regional_metrics(
-                            mode,
-                            conn_mode,
-                            preproc_level,
-                            harmonized_dir
-                            )
+
+    for preproc_level in preproc_levels:
+        for space in spaces:
+            for conn_mode in conn_modes:
+                for suffix in suffixes:
+                    fname_save = hm_dir / f"conn_{space}_preproc_{preproc_level}_{suffix}.csv"
+                
+                    if fname_save.exists():
+                        continue
+                    else:
+                        compute_regional_metrics(
+                                                space,
+                                                conn_mode,
+                                                preproc_level,
+                                                suffix,
+                                                hm_dir
+                                                )
