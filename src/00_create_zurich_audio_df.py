@@ -66,4 +66,5 @@ for hemi in ["L", "R"]:
     df[f"A{hemi}E_2000"] = df[f"A{hemi}E_2000"] + 3
 
 df = df[["antinomics_id", "tide_id"] + freq_cols]
+df.sort_values(by="tide_id", inplace=True)
 df.to_csv("../material/zurich_audio.csv")
