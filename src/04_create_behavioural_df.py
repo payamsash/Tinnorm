@@ -161,3 +161,4 @@ cols_required = [
 df_all.dropna(subset=cols_required, inplace=True)
 df_all["group"] = np.where(df_all["group"] <= tinnitus_thr, 1, 0)
 df_all.sort_values(by=["site", "subject_id"], inplace=True)
+df_all.to_csv("../material/master.csv")
