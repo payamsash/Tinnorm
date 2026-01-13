@@ -2,7 +2,11 @@ import os
 from pathlib import Path
 import pandas as pd
 from tqdm import tqdm
-from neuroHarmonize import harmonizationLearn
+from neuroHarmonize import (
+    harmonizationLearn,
+    harmonizationApply,
+    loadHarmonizationModel,
+    )
 
 def harmonize(                
                 preproc_level,
@@ -42,7 +46,8 @@ def harmonize(
 
     ## create covariates df and match 2 dfs
     df_q = pd.read_csv("../material/master.csv")
-    df_covars = df_q[["site", "age", "sex",	"subject_id"]]
+    cols = ["site", "age", "sex", "subject_id", "PTA4_mean", "group"]
+    df_covars = df_q[cols]
     df_covars.rename(columns={"site": "SITE"}, inplace=True)
     df_covars['subject_id'] = df_covars['subject_id'].astype(str)
     df_merged = pd.merge(df_data, df_covars, on='subject_id', how='inner')
@@ -60,25 +65,50 @@ def harmonize(
         df_merged.to_csv(fname_save)
 
     else:
-        data_matrix = df_merged.iloc[:, :-4].to_numpy()
-        df_cov = df_merged[["SITE",	"age",	"sex"]]
-        hm_model, data_adj, s_data = harmonizationLearn(
-                                                        data_matrix,
-                                                        df_cov,
-                                                        eb=True,
-                                                        seed=0,
-                                                        return_s_data=True
-                                                        )
+        
+        data_full = df_merged.iloc[:, :-len(cols)].to_numpy()
+        df_cov_full = df_merged[["SITE", "age",	"sex", "PTA4_mean"]]
 
+        ## get the residuals (s_data)
+        _, _, s_data = harmonizationLearn(
+                                            data_full,
+                                            df_cov_full,
+                                            eb=True,
+                                            seed=0,
+                                            return_s_data=True
+                                            )
+
+        ## learn the model on controls
+        df_train = df_merged.query('group == 0')
+        data_controls = df_train.iloc[:, :-len(cols)].to_numpy()
+        df_cov_controls = df_train[["SITE",	"age", "sex", "PTA4_mean"]]
+        
+        hm_model, _ = harmonizationLearn(
+                                            data_controls,
+                                            df_cov_controls,
+                                            eb=True,
+                                            seed=0,
+                                            return_s_data=False
+                                            )
+        
+        ## apply the model on all subjects
+        bayes_data = harmonizationApply(
+                                        data_full,
+                                        df_cov_full,
+                                        hm_model
+                                        )
+        
         ## replace and save
-        column_names = df_merged.columns[:-4]
-        for data, title in zip([data_adj, s_data], ["hm", "residual"]):
+        column_names = df_merged.columns[:-len(cols)]
+        for data, title in zip([bayes_data, s_data], ["hm", "residual"]):
             df_hm = pd.DataFrame(data, columns=column_names)
-            df_hm = pd.concat([df_hm, df_merged[['SITE', 'subject_id', 'age', 'sex']].reset_index(drop=True)], axis=1)
+            df_hm = pd.concat([df_hm, df_merged[df_merged.columns[:-len(cols)]].reset_index(drop=True)], axis=1)
+            
             if modality == "conn":
                 fname_save = saving_dir / f"{modality}_{space}_preproc_{preproc_level}_{conn_mode}_{title}.csv"
             else:
                 fname_save = saving_dir / f"{modality}_{space}_preproc_{preproc_level}_{title}.csv"
+            
             df_hm.to_csv(fname_save)
 
 if __name__ == "__main__":
@@ -90,7 +120,7 @@ if __name__ == "__main__":
     
     preproc_levels = [2]
     spaces = ["sensor", "source"][1:]
-    modalities = ["power", "conn", "aperiodic"][2:3]
+    modalities = ["power", "conn", "aperiodic"][:1]
     conn_modes = ["pli", "plv", "coh"][2:]
 
     for preproc_level in preproc_levels:
@@ -112,3 +142,4 @@ if __name__ == "__main__":
                                     features_dir
                                     )
 
+## only train on controls then apply to all (should fix this)
