@@ -24,7 +24,7 @@ def run_nm(
     df_master["subject_id"] = df_master["subject_id"].astype(str)
 
     df = df.merge(
-                df_master[["subject_id", "group", "PTA4_mean"]],
+                df_master[["subject_id"]],
                 on="subject_id",
                 how="inner"
                 )
@@ -34,7 +34,7 @@ def run_nm(
     kwargs = {
                 "covariates": ["age", "sex", "PTA4_mean"],
                 "batch_effects": ["SITE"],
-                "response_vars": list(df.columns[:-6]), # [c for c in df.columns[:-6] if c.endswith("alpha_1")], # list(df.columns[:-6]), # [c for c in df.columns[:-6] if c.endswith("alpha_1_pli")]
+                "response_vars": [c for c in df.columns[:-6] if c.endswith("alpha_1_coh")], # list(df.columns[:-6]),
                 "subject_ids": "subject_id"
                 }
 
@@ -104,7 +104,7 @@ if __name__ == "__main__":
     
     preproc_levels = [2]
     spaces = ["sensor", "source"][1:]
-    modalities = ["power", "conn", "aperiodic", "global", "regional"][2:3]
+    modalities = ["power", "conn", "aperiodic", "global", "regional"][-2:]
     conn_modes = ["pli", "plv", "coh"][2:]
 
     for preproc_level in preproc_levels:
@@ -112,8 +112,8 @@ if __name__ == "__main__":
             for modality in modalities:
                 for conn_mode in conn_modes:
                     
-                    if modality == ["conn", "global", "regional"]:
-                        fname_featur = hm_dir / f"{modality}_{space}_preproc_{preproc_level}_{conn_mode}_hm.csv"
+                    if modality in ["conn", "global", "regional"]:
+                        fname_feature = hm_dir / f"{modality}_{space}_preproc_{preproc_level}_{conn_mode}_hm.csv"
                         model_dir = models_dir / f"{modality}_{space}_preproc_{preproc_level}_{conn_mode}"
 
                     if modality in ["aperiodic", "power"]:
