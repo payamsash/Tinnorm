@@ -47,7 +47,6 @@ def compute_regional_metrics(
     df_adj = pd.read_csv("../material/aparc_adjacency.csv")
     df_adj.drop(columns="Unnamed: 0", inplace=True)
 
-
     freq_bands = {
                 "delta": [1, 6],
                 "theta": [6.5, 8.5],
@@ -104,6 +103,10 @@ def compute_regional_metrics(
     df_res = pd.concat(df_re_list, axis=1)
     df_nss = pd.concat(df_ns_list, axis=1)
 
+    cols = ["subject_id", "SITE", "age", "sex", "PTA4_mean", "group"]
+    df_res = pd.concat([df_res, df_conn[cols]], axis=1)
+    df_nss = pd.concat([df_nss, df_conn[cols]], axis=1)
+
     ## save it in harmonized folder path
     for df, title in zip([df_res, df_nss], ["regional", "global"]):
         df.to_csv(hm_dir / f"{title}_{space}_preproc_{preproc_level}_{conn_mode}_{suffix}.csv")
@@ -138,3 +141,6 @@ if __name__ == "__main__":
                                                 suffix,
                                                 hm_dir
                                                 )
+                        
+
+## add the 6 columns here
