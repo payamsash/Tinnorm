@@ -102,13 +102,14 @@ def harmonize(
         column_names = df_merged.columns[:-len(cols)]
         for data, title in zip([bayes_data, s_data], ["hm", "residual"]):
             df_hm = pd.DataFrame(data, columns=column_names)
-            df_hm = pd.concat([df_hm, df_merged[df_merged.columns[:-len(cols)]].reset_index(drop=True)], axis=1)
+            df_hm = df_hm.round(4)
+            df_hm = pd.concat([df_hm, df_merged[df_merged.columns[-len(cols):]].reset_index(drop=True)], axis=1)
             
             if modality == "conn":
                 fname_save = saving_dir / f"{modality}_{space}_preproc_{preproc_level}_{conn_mode}_{title}.csv"
             else:
                 fname_save = saving_dir / f"{modality}_{space}_preproc_{preproc_level}_{title}.csv"
-            
+
             df_hm.to_csv(fname_save)
 
 if __name__ == "__main__":
@@ -120,7 +121,7 @@ if __name__ == "__main__":
     
     preproc_levels = [2]
     spaces = ["sensor", "source"][1:]
-    modalities = ["power", "conn", "aperiodic"][:1]
+    modalities = ["power", "conn", "aperiodic"][1:2]
     conn_modes = ["pli", "plv", "coh"][2:]
 
     for preproc_level in preproc_levels:
@@ -141,5 +142,3 @@ if __name__ == "__main__":
                                     hm_dir,
                                     features_dir
                                     )
-
-## only train on controls then apply to all (should fix this)
