@@ -4,8 +4,7 @@ import pandas as pd
 from tqdm import tqdm
 from neuroHarmonize import (
     harmonizationLearn,
-    harmonizationApply,
-    loadHarmonizationModel,
+    harmonizationApply
     )
 
 def harmonize(                
@@ -121,7 +120,7 @@ if __name__ == "__main__":
     
     preproc_levels = [2]
     spaces = ["sensor", "source"][1:]
-    modalities = ["power", "conn", "aperiodic"][1:2]
+    modalities = ["power", "conn", "aperiodic"][2:]
     conn_modes = ["pli", "plv", "coh"][2:]
 
     for preproc_level in preproc_levels:
