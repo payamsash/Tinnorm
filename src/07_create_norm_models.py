@@ -34,7 +34,7 @@ def run_nm(
     kwargs = {
                 "covariates": ["age", "sex", "PTA4_mean"],
                 "batch_effects": ["SITE"],
-                "response_vars": [c for c in df.columns[:-6] if c.endswith("alpha_1_coh")], # list(df.columns[:-6]),
+                "response_vars": [c for c in df.columns[:-6] if c.endswith(f"alpha_1")], # list(df.columns[:-6])
                 "subject_ids": "subject_id"
                 }
 
@@ -60,15 +60,17 @@ def run_nm(
                     "save_dir": model_dir / "for_eval",
                     "train": norm_train_control,
                     "test": norm_test_control,
+                    "savemodel": False,
                 },
                 {
                     "save_dir": model_dir / "full_model",
                     "train": norm_train_all,
                     "test": norm_test_tinnitus,
+                    "savemodel": True,
                 },
                 ]
 
-    for cfg in configs:
+    for cfg in configs[1:]:
         template_blr = BLR(
             name="payam_blr",
             basis_function_mean=BsplineBasisFunction(degree=3, nknots=5),
@@ -79,17 +81,15 @@ def run_nm(
 
         model = NormativeModel(
             template_regression_model=template_blr,
-            savemodel=False,
+            savemodel=cfg["savemodel"],
             evaluate_model=True,
             saveresults=True,
             saveplots=False,
-            save_dir=cfg["save_dir"],
+            save_dir=str(cfg["save_dir"]),
             inscaler="standardize",
             outscaler="none",
         )
-
         model.fit_predict(cfg["train"], cfg["test"])
-        # model.save(cfg["save_dir"])
 
         del model
         del template_blr
@@ -104,7 +104,7 @@ if __name__ == "__main__":
     
     preproc_levels = [2]
     spaces = ["sensor", "source"][1:]
-    modalities = ["power", "conn", "aperiodic", "global", "regional"][-2:]
+    modalities = ["aperiodic", "conn", "power", "global", "regional"][2:3]
     conn_modes = ["pli", "plv", "coh"][2:]
 
     for preproc_level in preproc_levels:
@@ -126,18 +126,3 @@ if __name__ == "__main__":
                                 model_dir,
                                 random_state=42
                                 )
-
-
-'''
-we will need this for plotting later ...
-plot_centiles_advanced(
-                        model,
-                        centiles=[0.05, 0.5, 0.95],
-                        covariate="age",
-                        batch_effects={"SITE": ["austin", "illinois", "regensburg", "tuebingen"]},
-                        scatter_data=train,
-                        show_other_data=False,
-                        harmonize_data=True,
-                        show_yhat=True
-                        )
-'''
