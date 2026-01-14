@@ -70,7 +70,7 @@ def run_nm(
                 },
                 ]
 
-    for cfg in configs[1:]:
+    for cfg in configs:
         template_blr = BLR(
             name="payam_blr",
             basis_function_mean=BsplineBasisFunction(degree=3, nknots=5),
