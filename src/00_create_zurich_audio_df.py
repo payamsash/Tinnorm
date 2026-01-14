@@ -61,10 +61,16 @@ for subject in tqdm(ant_subjects):
 df = pd.DataFrame(rows)
 
 ## fix 2 frequency calibration
-for hemi in ["L", "R"]:
+hemis = ["L", "R"]
+for hemi in hemis:
     df[f"A{hemi}E_250"] = df[f"A{hemi}E_250"] - 8
     df[f"A{hemi}E_2000"] = df[f"A{hemi}E_2000"] + 3
 
 df = df[["antinomics_id", "tide_id"] + freq_cols]
+
+freqs = [250, 500, 1000, 2000]
+cols = [f"A{h}E_{f}" for h in hemis for f in freqs]
+df["PTA4_mean"] = df[cols].mean(axis=1)
+
 df.sort_values(by="tide_id", inplace=True)
 df.to_csv("../material/zurich_audio.csv")
