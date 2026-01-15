@@ -60,8 +60,9 @@ def harmonize(
 
     ## harmonize
     if modality == "aperiodic":
-        fname_save = saving_dir / f"{modality}_{space}_preproc_{preproc_level}_hm.csv"
-        df_merged.to_csv(fname_save)
+        for hm_mode in ["hm", "residual"]:
+            fname_save = saving_dir / f"{modality}_{space}_preproc_{preproc_level}_{hm_mode}.csv"
+            df_merged.to_csv(fname_save)
 
     else:
         
