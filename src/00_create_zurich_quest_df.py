@@ -3,7 +3,7 @@ import pandas as pd
 
 ## read the files
 quest_dir = Path("../material/questionnaires")
-fname_zu = "/Volumes/G_USZ_ORL$/Research/ANTINOMICS/data/unipark/Di 21.10.25/data_project_995463_2025_10_21.csv" # unipark dir
+fname_zu = "/Users/payamsadeghishabestari/Desktop/data_project_995463_2026_01_14 (1).csv" # unipark dir
 fname_reg = quest_dir / "Questionnaire_data_TIDE_REG.csv"
 fname_ant_to_tide = "../material/ant_to_tide.csv"
 
@@ -18,8 +18,13 @@ df_reg = pd.read_csv(
 )
 df_map = pd.read_csv(fname_ant_to_tide)
 
-## convert the unipark to regensburg style
+## add esit and tschq
 df_zu.columns = df_zu.columns.str.lower()
+extra_cols = df_zu.columns[
+                            df_zu.columns.str.startswith(("esit", "tschq"))
+                            ]
+
+## convert the unipark to regensburg style
 df_zu.rename(
             columns={
                     "studiennummer": "study_id",
@@ -28,8 +33,10 @@ df_zu.rename(
                     },
             inplace=True
             )
+
 common_cols = df_zu.columns.intersection(df_reg.columns)
-df_zu = df_zu[common_cols]
+final_cols = list(common_cols) + list(extra_cols)
+df_zu = df_zu[final_cols]
 
 ## check what is. miising
 df_zu["study_id"] = (
