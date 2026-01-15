@@ -10,8 +10,6 @@ from mne.viz import Brain
 from nilearn.plotting import plot_connectome
 from nichord.chord import plot_chord
 
-
-
 def plot_brain(
         metric_vals,
         palette,
