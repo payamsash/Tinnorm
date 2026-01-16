@@ -206,7 +206,7 @@ def _run_comparison(X_1, X_2, y, y_2, sites, sites_2, model, n_permutations):
     p_value = np.mean(np.abs(delta_null) >= np.abs(real_delta))
     print(f"Permutation p-value (X1 vs X2): {p_value:.4f}")
 
-    return  df_metric, y_prob_1, y_prob_2, delta_null, real_delta, p_value
+    return  df_metric, y, y_prob_1, y_prob_2, delta_null, real_delta, p_value
 
 
 def classify(
@@ -257,7 +257,7 @@ def classify(
             )
         X_2 = X_2.to_numpy()
 
-        df_metric, y_prob_1, y_prob_2, delta_null, \
+        df_metric, y, y_prob_1, y_prob_2, delta_null, \
             real_delta, p_value  = \
                 _run_comparison(X_1, X_2, y, y_2, sites, sites_2, model, n_permutations)
 
@@ -269,9 +269,8 @@ def classify(
         for col_name, col_val in zip(col_names, col_vals):
             df_metric[col_name] = [col_val] * len_df
 
-    
     if run_comparison: 
-        return df_metric, y_prob_1, y_prob_2, delta_null, real_delta, p_value
+        return df_metric, y, y_prob_1, y_prob_2, delta_null, real_delta, p_value
     else:
         if run_permutation:
             return df_metric
