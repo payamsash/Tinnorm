@@ -3,26 +3,34 @@ import pandas as pd
 
 ## read the files
 quest_dir = Path("../material/questionnaires")
-fname_zu = "/Users/payamsadeghishabestari/Desktop/data_project_995463_2026_01_14 (1).csv" # unipark dir
+fname_zu = "/Users/payamsadeghishabestari/Desktop/data_project_995463_2026_01_14.csv" # unipark dir
 fname_reg = quest_dir / "Questionnaire_data_TIDE_REG.csv"
 fname_ant_to_tide = "../material/ant_to_tide.csv"
 
 df_zu = pd.read_csv(
     fname_zu,
-    sep=";",
     engine="python"
 )
+df_zu.columns = df_zu.iloc[0]
+df_zu = df_zu[1:].reset_index(drop=True)
+
 df_reg = pd.read_csv(
     fname_reg,
     engine="python"
 )
+
+## select only those who had visit 1
 df_map = pd.read_csv(fname_ant_to_tide)
+df_map.drop(columns=["Unnamed: 0", "rest_2"], inplace=True)
+paradigms = df_map.columns[2:]
+df_map = df_map[df_map[paradigms].all(axis=1)].reset_index(drop=True)
 
 ## add esit and tschq
 df_zu.columns = df_zu.columns.str.lower()
 extra_cols = df_zu.columns[
                             df_zu.columns.str.startswith(("esit", "tschq"))
-                            ]
+                            ] 
+
 
 ## convert the unipark to regensburg style
 df_zu.rename(
@@ -35,7 +43,7 @@ df_zu.rename(
             )
 
 common_cols = df_zu.columns.intersection(df_reg.columns)
-final_cols = list(common_cols) + list(extra_cols)
+final_cols = list(common_cols) + list(extra_cols) + ["tinnitus_present"] 
 df_zu = df_zu[final_cols]
 
 ## check what is. miising
@@ -66,7 +74,7 @@ df_zu.rename(columns={
                             "TEMP": "tide_id"}, 
                             inplace=True
                             )
-df_zu.drop(columns=["antinomics_id", "TEMP"], inplace=True)
+df_zu.drop(columns=["TEMP"], inplace=True) # "antinomics_id", 
 
 ## fix age column
 df_zu["esit_a1"] = df_zu["esit_a1"].astype(str).str.extract(r"(\d+)")[0].astype(float)
@@ -79,5 +87,6 @@ cols = [cols[-1]] + cols[:-1]
 df_zu = df_zu[cols]
 df_zu = df_zu.dropna(subset=["study_id"]).reset_index(drop=True)
 df_zu["study_id"] = df_zu["study_id"].astype(int)
-df_zu.sort_values(by="study_id", inplace=True)
-df_zu.to_csv("../material/questionnaires/Questionnaire_data_TIDE_ZUE.csv")
+df_zu.sort_values(by="antinomics_id", inplace=True)
+df_zu = df_zu[[df_zu.columns[-1]] + list(df_zu.columns[:-1])]
+df_zu.reset_index(drop=True).to_csv("../material/questionnaires/Questionnaire_data_TIDE_ZUE.csv")
