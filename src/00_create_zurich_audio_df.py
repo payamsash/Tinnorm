@@ -13,6 +13,11 @@ ant_subjects = [p.stem for p in audio_dir.iterdir() if p.is_dir()]
 ant_to_tide_fname = "../material/ant_to_tide.csv"
 df_map = pd.read_csv(ant_to_tide_fname)
 
+## only full v1 subjects
+df_map.drop(columns=["Unnamed: 0", "rest_2"], inplace=True)
+paradigms = df_map.columns[2:]
+df_map = df_map[df_map[paradigms].all(axis=1)].reset_index(drop=True)
+
 # The frequencies you want as columns
 target_freqs = [125, 250, 500, 1000, 2000, 4000, 6000, 8000, 12000]
 
@@ -72,5 +77,6 @@ freqs = [250, 500, 1000, 2000]
 cols = [f"A{h}E_{f}" for h in hemis for f in freqs]
 df["PTA4_mean"] = df[cols].mean(axis=1)
 
+df["antinomics_id"] = df["antinomics_id"].replace("wzdc", "wcdc")
 df.sort_values(by="tide_id", inplace=True)
 df.to_csv("../material/zurich_audio.csv")
