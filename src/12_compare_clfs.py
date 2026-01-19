@@ -156,6 +156,21 @@ def run_loso_cv(X, y, sites, model):
 
     return y_pred, y_prob
 
+def run_loso_cv_with_folds(X, y, sites, model):
+    gkf = GroupKFold(n_splits=len(np.unique(sites)))
+    
+    fold_probs = []
+    fold_true = []
+
+    for train_idx, test_idx in gkf.split(X, y, groups=sites):
+        model.fit(X[train_idx], y[train_idx])
+        prob = model.predict_proba(X[test_idx])[:, 1]
+        fold_probs.append(prob)
+        fold_true.append(y[test_idx])
+
+    return fold_true, fold_probs
+
+
 def _run_comparison(X_1, X_2, y, y_2, sites, sites_2, model, n_permutations):
 
     # checks
@@ -225,7 +240,7 @@ def classify(
     ):
 
     tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")    
-    X, y, sites = _read_the_file(data_mode, tinnorm_dir, mode, space, preproc_level, conn_mode)
+    X, y, sites = _read_the_file(data_mode, tinnorm_dir, mode, space, preproc_level, conn_mode, thi_threshold=None)
 
     ## remove highly correlated features
     if high_corr_drop:
@@ -260,6 +275,10 @@ def classify(
         df_metric, y, y_prob_1, y_prob_2, delta_null, \
             real_delta, p_value  = \
                 _run_comparison(X_1, X_2, y, y_2, sites, sites_2, model, n_permutations)
+        
+        ## get CI for the ROC curve by running LOSO with folds
+        y1_folds, p1_folds = run_loso_cv_with_folds(X_1, y, sites, model)
+        y2_folds, p2_folds = run_loso_cv_with_folds(X_2, y, sites, model)
 
     # add context columns
     if not df_metric.empty:
@@ -269,11 +288,13 @@ def classify(
         for col_name, col_val in zip(col_names, col_vals):
             df_metric[col_name] = [col_val] * len_df
 
+    
     if run_comparison: 
-        return df_metric, y, y_prob_1, y_prob_2, delta_null, real_delta, p_value
+        return df_metric, y, y_prob_1, y_prob_2, delta_null, real_delta, p_value, y1_folds, p1_folds, y2_folds, p2_folds
     else:
         if run_permutation:
             return df_metric
+
 
 
 if __name__ == "__main__":
@@ -281,7 +302,7 @@ if __name__ == "__main__":
 
     data_mode = "residual"
     space = "source"
-    mode = "aperiodic"
+    mode = "power"
     preproc_level = 2
     conn_mode = "coh" 
     high_corr_drop = False
@@ -289,17 +310,22 @@ if __name__ == "__main__":
     ml_model = "RF"
     n_jobs=-1 
 
-    classify(data_mode,
-            space, 
-            mode,
-            preproc_level,
-            conn_mode,
-            high_corr_drop,
-            corr_thr,
-            ml_model,
-            n_jobs,
-            run_permutation=False,
-            run_comparison=False,
-            n_permutations=100
-            )
+    df_metric, y, y_prob_1, y_prob_2, \
+        delta_null, real_delta, p_value, \
+            y1_folds, p1_folds, y2_folds, p2_folds = \
+                classify(
+                        data_mode,
+                        space, 
+                        mode,
+                        preproc_level,
+                        conn_mode,
+                        high_corr_drop,
+                        corr_thr,
+                        ml_model,
+                        n_jobs,
+                        run_permutation=False,
+                        run_comparison=True,
+                        n_permutations=10
+                        )
 
+    ## add saving options
