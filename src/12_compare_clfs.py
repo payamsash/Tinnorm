@@ -20,11 +20,13 @@ def _read_the_file(
                 mode,
                 space,
                 preproc_level,
-                conn_mode
+                conn_mode,
+                thi_threshold=None
                 ):
     
     hm_dir = tinnorm_dir / "harmonized"
     models_dir = tinnorm_dir / "models"
+    df_master = pd.read_csv("../material/master.csv")
 
     ## Residual data
     if data_mode == "residual":
@@ -35,7 +37,15 @@ def _read_the_file(
         fname = hm_dir / f"{mode_prefix}_residual.csv"
         df = pd.read_csv(fname)
 
-        cols_to_drop = ["Unnamed: 0", "subject_id", "age", "sex", "PTA4_mean"]
+        if not thi_threshold is None:
+            df = df.merge(
+                        df_master[['subject_id', 'thi_score']],
+                        on='subject_id',
+                        how='left'
+                    )
+            df = df.query(f'group == 0 or thi_score > {thi_threshold}')
+
+        cols_to_drop = ["Unnamed: 0", "subject_id", "age", "sex", "PTA4_mean", "thi_score"]
         df.drop(columns=cols_to_drop, inplace=True, errors="ignore")
         
     ## Deviation data
@@ -58,14 +68,25 @@ def _read_the_file(
         df = df.merge(df_master[['subject_id', 'site']], on='subject_id', how='left')
         df.rename(columns={"site": "SITE"}, inplace=True)
 
+        if not thi_threshold is None:
+            df = df.merge(
+                        df_master[['subject_id', 'thi_score']],
+                        on='subject_id',
+                        how='left'
+                    )
+            df = df.query(f'group == 0 or thi_score > {thi_threshold}')
+
         df.sort_values("subject_id", inplace=True)
-        df.drop(columns=["observations", "subject_id"], inplace=True)
-    
+        df.drop(columns=["observations", "subject_id", "thi_score"], inplace=True, errors="ignore")
+
     X = df[list(df.columns)[:-2]]
     y = df["group"].to_numpy()         
     sites = df["SITE"].to_numpy()
 
+    print(f"number of subjects are: {df['group'].value_counts()}")
+
     return X, y, sites
+
 
 def _initiate_ml_model(ml_model, n_jobs):
 
@@ -237,10 +258,11 @@ def classify(
         run_permutation=False,
         run_comparison=False,
         n_permutations=100,
+        thi_threshold=None
     ):
 
     tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")    
-    X, y, sites = _read_the_file(data_mode, tinnorm_dir, mode, space, preproc_level, conn_mode, thi_threshold=None)
+    X, y, sites = _read_the_file(data_mode, tinnorm_dir, mode, space, preproc_level, conn_mode, thi_threshold)
 
     ## remove highly correlated features
     if high_corr_drop:
@@ -268,7 +290,7 @@ def classify(
                 f"data_mode must be set to 'residual' for comparison, got '{data_mode}' instead."
             )
         X_2, y_2, sites_2 = _read_the_file(
-            "deviation", tinnorm_dir, mode, space, preproc_level, conn_mode
+            "deviation", tinnorm_dir, mode, space, preproc_level, conn_mode, thi_threshold
             )
         X_2 = X_2.to_numpy()
 
@@ -325,7 +347,8 @@ if __name__ == "__main__":
                         n_jobs,
                         run_permutation=False,
                         run_comparison=True,
-                        n_permutations=10
+                        n_permutations=10,
+                        thi_threshold=30
                         )
 
     ## add saving options
