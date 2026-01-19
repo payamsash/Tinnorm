@@ -1,6 +1,5 @@
 import os
 from pathlib import Path
-import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 
@@ -19,6 +18,8 @@ pal = [
 
 xlim = [5, 80]
 bw_adjust = 0.5
+saving_dir = tinnorm_dir / "plots" / "demographics"
+os.makedirs(saving_dir, exist_ok=True)
 
 for hue in hues:
         g = sns.FacetGrid(
@@ -35,13 +36,10 @@ for hue in hues:
         g.figure.subplots_adjust(hspace=.15, top=0.72)
         g.set_titles("")
         g.add_legend()
-        g.set(yticks=[], ylabel="", xlabel=r"Age")
+        g.set(yticks=[], ylabel="", xlabel=r"age, sex")
         g.despine(bottom=True, left=True)
-
-        os.makedirs(tinnorm_dir / "plots", exist_ok=True)
-        g.figure.savefig(tinnorm_dir / "plots" / f"{hue}_distribution.pdf", 
+        g.figure.savefig(saving_dir / f"{hue}_distribution.pdf", 
                         format="pdf",       
                         dpi=300,            
                         bbox_inches="tight"
                         )
-        # plt.show()
