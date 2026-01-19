@@ -3,7 +3,7 @@ import pandas as pd
 
 ## read the files
 quest_dir = Path("../material/questionnaires")
-fname_zu = "/Users/payamsadeghishabestari/Desktop/data_project_995463_2026_01_14.csv" # unipark dir
+fname_zu = "../material/questionnaires/data_project_995463_2026_01_14.csv" # unipark dir
 fname_reg = quest_dir / "Questionnaire_data_TIDE_REG.csv"
 fname_ant_to_tide = "../material/ant_to_tide.csv"
 
@@ -19,11 +19,12 @@ df_reg = pd.read_csv(
     engine="python"
 )
 
-## select only those who had visit 1
+## select only those who had visit 1 and fix wzdc -> wcdc
 df_map = pd.read_csv(fname_ant_to_tide)
 df_map.drop(columns=["Unnamed: 0", "rest_2"], inplace=True)
 paradigms = df_map.columns[2:]
 df_map = df_map[df_map[paradigms].all(axis=1)].reset_index(drop=True)
+df_map["antinomics_id"] = df_map["antinomics_id"].replace("wzdc", "wcdc")
 
 ## add esit and tschq
 df_zu.columns = df_zu.columns.str.lower()
@@ -89,4 +90,6 @@ df_zu = df_zu.dropna(subset=["study_id"]).reset_index(drop=True)
 df_zu["study_id"] = df_zu["study_id"].astype(int)
 df_zu.sort_values(by="antinomics_id", inplace=True)
 df_zu = df_zu[[df_zu.columns[-1]] + list(df_zu.columns[:-1])]
+df_zu["intro_gender"] = df_zu["intro_gender"].replace({"1": "2", "2": "1"}) # TIDE compatible
+df_zu.sort_values(by="study_id", inplace=True)
 df_zu.reset_index(drop=True).to_csv("../material/questionnaires/Questionnaire_data_TIDE_ZUE.csv")
