@@ -119,6 +119,19 @@ def _initiate_ml_model(ml_model, n_jobs):
     
     return model
 
+def _initiate_rfe_model(base_model, n_features_to_select=None, step=1):
+    """
+    Wrap a classifier with RFE. If n_features_to_select is None, defaults to half of features.
+    """
+    rfe_model = RFE(
+                    estimator=base_model,
+                    n_features_to_select=n_features_to_select,
+                    step=step,
+                    verbose=2
+                    )
+    return rfe_model
+
+
 
 def _run_permutation(X_np, y, sites, model, ml_model, n_permutations):
 
@@ -266,8 +279,10 @@ def classify(
         n_jobs,
         run_permutation=False,
         run_comparison=False,
+        apply_rfe=False,
         n_permutations=100,
-        thi_threshold=None
+        thi_threshold=None,
+        n_rfe_features=100,
     ):
 
     tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")    
@@ -286,6 +301,16 @@ def classify(
     X_1 = X.to_numpy()
     df_metric = pd.DataFrame()
 
+    if apply_rfe:
+        n_select = min(n_rfe_features, X_1.shape[1] // 2)
+        print(f"Applying RFE: selecting top {n_select} features")
+        
+        if mode == "power":
+            step = 20
+        if mode == "conn":
+            step = 100
+
+        model = _initiate_rfe_model(model, n_features_to_select=n_select, step=step)
     
     ## permutation test
     if run_permutation:
@@ -357,8 +382,10 @@ if __name__ == "__main__":
                         n_jobs,
                         run_permutation=False,
                         run_comparison=True,
+                        apply_rfe=False,
                         n_permutations=10,
-                        thi_threshold=30
+                        thi_threshold=30,
+                        n_rfe_features=100
                         )
 
     ## add saving options
