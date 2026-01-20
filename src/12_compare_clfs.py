@@ -64,7 +64,6 @@ def _read_the_file(
         df = pd.concat(dfs_group, axis=0, ignore_index=True)
         df.rename(columns={"subject_ids": "subject_id"}, inplace=True)
 
-        df_master = pd.read_csv("../material/master.csv")
         df = df.merge(df_master[['subject_id', 'site']], on='subject_id', how='left')
         df.rename(columns={"site": "SITE"}, inplace=True)
 
@@ -352,3 +351,4 @@ if __name__ == "__main__":
                         )
 
     ## add saving options
+    ## must create folders
