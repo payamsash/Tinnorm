@@ -6,6 +6,7 @@ import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
 from sklearn.model_selection import GroupKFold
+from sklearn.feature_selection import RFE
 from sklearn.metrics import (
     balanced_accuracy_score,
     precision_score,
@@ -19,6 +20,7 @@ def _read_the_file(
                 tinnorm_dir,
                 mode,
                 space,
+                freq_band,
                 preproc_level,
                 conn_mode,
                 thi_threshold=None
@@ -78,11 +80,16 @@ def _read_the_file(
         df.sort_values("subject_id", inplace=True)
         df.drop(columns=["observations", "subject_id", "thi_score"], inplace=True, errors="ignore")
 
-    X = df[list(df.columns)[:-2]]
+    
     y = df["group"].to_numpy()         
     sites = df["SITE"].to_numpy()
-
     print(f"number of subjects are: {df['group'].value_counts()}")
+
+    if not freq_band is None:
+        df = df.filter(regex=rf"{freq_band}")
+    
+    X = df[list(df.columns)[:-2]]
+    print(f"number of features are: {X.shape[1]}")
 
     return X, y, sites
 
@@ -164,7 +171,9 @@ def metrics_to_dataframe(model_name, y, y_pred, y_prob=None):
     })
 
 def run_loso_cv(X, y, sites, model):
-    gkf = GroupKFold(n_splits=len(np.unique(sites)))
+    
+    gkf = GroupKFold(n_splits=len(np.unique(sites))) # LOSO
+    # gkf = StratifiedKFold(n_splits=10, shuffle=True) # normal
 
     y_pred = np.zeros_like(y)
     y_prob = np.zeros(len(y))
@@ -248,6 +257,7 @@ def classify(
         data_mode,
         space, 
         mode,
+        freq_band,
         preproc_level,
         conn_mode,
         high_corr_drop,
@@ -261,7 +271,7 @@ def classify(
     ):
 
     tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")    
-    X, y, sites = _read_the_file(data_mode, tinnorm_dir, mode, space, preproc_level, conn_mode, thi_threshold)
+    X, y, sites = _read_the_file(data_mode, tinnorm_dir, mode, space, freq_band, preproc_level, conn_mode, thi_threshold)
 
     ## remove highly correlated features
     if high_corr_drop:
@@ -289,7 +299,7 @@ def classify(
                 f"data_mode must be set to 'residual' for comparison, got '{data_mode}' instead."
             )
         X_2, y_2, sites_2 = _read_the_file(
-            "deviation", tinnorm_dir, mode, space, preproc_level, conn_mode, thi_threshold
+            "deviation", tinnorm_dir, mode, space, freq_band, preproc_level, conn_mode, thi_threshold
             )
         X_2 = X_2.to_numpy()
 
@@ -309,8 +319,9 @@ def classify(
         for col_name, col_val in zip(col_names, col_vals):
             df_metric[col_name] = [col_val] * len_df
 
-    
     if run_comparison: 
+        df_metric.at[1, "data_mode"] = "deviation"
+        
         return df_metric, y, y_prob_1, y_prob_2, delta_null, real_delta, p_value, y1_folds, p1_folds, y2_folds, p2_folds
     else:
         if run_permutation:
