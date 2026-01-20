@@ -28,7 +28,7 @@ for hue in hues:
         )
 
         g.map(sns.kdeplot, "age", bw_adjust=bw_adjust, clip_on=False, clip=xlim,
-                fill=True, alpha=0.5, linewidth=1.5)
+                fill=True, alpha=0.7, linewidth=1.5)
         g.map(sns.kdeplot, "age", clip_on=False, color="w", clip=xlim,
                 lw=1.5, bw_adjust=bw_adjust)
         g.refline(y=0, linewidth=2, linestyle="-", color=None, clip_on=False)
