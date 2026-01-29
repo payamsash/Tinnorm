@@ -61,8 +61,8 @@ def harmonize(
     ## harmonize
     if modality == "aperiodic":
         for hm_mode in ["hm", "residual"]:
-            fname_save = saving_dir / f"{modality}_{space}_preproc_{preproc_level}_{hm_mode}.csv"
-            df_merged.to_csv(fname_save)
+            fname_save = saving_dir / f"preproc_{preproc_level}" / space / f"{modality}_{hm_mode}.csv"
+            df_merged.to_csv(fname_save, index=False)
 
     else:
         
@@ -103,12 +103,16 @@ def harmonize(
         for data, title in zip([bayes_data, s_data], ["hm", "residual"]):
             df_hm = pd.DataFrame(data, columns=column_names)
             df_hm = df_hm.round(4)
-            df_hm = pd.concat([df_hm, df_merged[df_merged.columns[-len(cols):]].reset_index(drop=True)], axis=1)
+            df_hm = pd.concat([
+                                df_hm,
+                                df_merged[df_merged.columns[-len(cols):]].reset_index(drop=True)],
+                                axis=1
+                                )
             
             if modality == "conn":
-                fname_save = saving_dir / f"{modality}_{space}_preproc_{preproc_level}_{conn_mode}_{title}.csv"
+                fname_save = saving_dir / f"preproc_{preproc_level}" / space / f"{modality}_{conn_mode}_{title}.csv"
             else:
-                fname_save = saving_dir / f"{modality}_{space}_preproc_{preproc_level}_{title}.csv"
+                fname_save = saving_dir / f"preproc_{preproc_level}" / space / f"{modality}_{title}.csv"
 
             df_hm.to_csv(fname_save, index=False)
 
