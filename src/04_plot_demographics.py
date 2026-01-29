@@ -3,14 +3,49 @@ from pathlib import Path
 import seaborn as sns
 import pandas as pd
 
+## initiate
 tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
+features_dir = tinnorm_dir / "features"
 hues = ["group", "sex"]
 df = pd.read_csv("../material/master.csv")
-df_plot = df[["site", "sex", "age", "group"]]
+df_plot = df[["subject_id", "site", "sex", "age", "group"]]
 
 df_plot["sex"] = df_plot["sex"].map({1: "Male", 2: "Female"})
 df_plot["group"] = df_plot["group"].map({0: "Control", 1: "Tinnitus"})
 
+## finding common subjects
+check_text = f"power_sensor_preproc_1.zip"
+
+ids_list = set(
+                [
+                fname.stem[4:9] for fname 
+                in features_dir.iterdir() 
+                if str(fname).endswith(check_text)
+                ]
+                )
+ids_df = set(df_plot["subject_id"].astype(str))
+
+only_in_list = sorted(ids_list - ids_df)
+only_in_df = sorted(ids_df - ids_list)
+
+print(f"Subjects only in list ({len(only_in_list)}):")
+print(only_in_list if only_in_list else "None")
+
+print(f"\nSubjects only in dataframe ({len(only_in_df)}):")
+print(only_in_df if only_in_df else "None")
+
+counts = (
+        pd.crosstab(df_plot["site"], df_plot["group"])
+        .rename(columns={0: "control", 1: "patient"})
+        )
+
+print("\n************** SITE × GROUP COUNTS **************")
+print(f"{counts}")
+print("*************************************************\n")
+
+## plotting part
+common_ids = ids_list & ids_df
+df_plot = df_plot[df_plot["subject_id"].astype(str).isin(common_ids)]
 site_names = df_plot["site"].unique()
 print(site_names)
 pal = [
