@@ -110,7 +110,7 @@ def harmonize(
             else:
                 fname_save = saving_dir / f"{modality}_{space}_preproc_{preproc_level}_{title}.csv"
 
-            df_hm.to_csv(fname_save)
+            df_hm.to_csv(fname_save, index=False)
 
 if __name__ == "__main__":
 
@@ -125,11 +125,16 @@ if __name__ == "__main__":
     conn_modes = ["pli", "plv", "coh"][2:]
 
     for preproc_level in preproc_levels:
+        os.makedirs(hm_dir / f"preproc_{preproc_level}", exist_ok=True)
+
         for space in spaces:
+            os.makedirs(hm_dir / f"preproc_{preproc_level}" / space, exist_ok=True)
+
             for modality in modalities:
                 for conn_mode in conn_modes:
-                    fname_save_1 = hm_dir / f"{modality}_{space}_preproc_{preproc_level}_hm.csv"
-                    fname_save_2 = hm_dir / f"{modality}_{space}_preproc_{preproc_level}_{conn_mode}_hm.csv"
+                    
+                    fname_save_1 = hm_dir / f"preproc_{preproc_level}" / space / f"{modality}_hm.csv"
+                    fname_save_2 = hm_dir / f"preproc_{preproc_level}" / space / f"{modality}_{conn_mode}_hm.csv"
                     
                     if fname_save_1.exists() or fname_save_2.exists():
                         continue
