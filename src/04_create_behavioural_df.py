@@ -32,6 +32,11 @@ Processing steps:
 Author: Payam S. Shabestari
 """
 
+from pathlib import Path
+from warnings import warn
+import numpy as np
+import pandas as pd
+
 behavioural_dir = Path.cwd().parent / "material" 
 site_map = {
         "1": "austin",
@@ -81,7 +86,13 @@ avg_pairs = {
 tinnitus_thr = 4
 dfs = []
 for site in site_map.values():
+
     site_code = site.upper()[:3]
+
+    if site_code == "ZUE":
+        print(f"{site} not ready yet ...")
+        continue
+
     quest_fname = behavioural_dir / "questionnaires" / f"Questionnaire_data_TIDE_{site_code}.csv"
     audio_fname = behavioural_dir / "audiograms" / f"Audiometry_data_TIDE_{site_code}.csv"
     
@@ -90,9 +101,9 @@ for site in site_map.values():
             f"{'questionnaire' if not quest_fname.is_file() else ''} "
             f"{'audiometry' if not audio_fname.is_file() else ''}. Skipping this site.")
         continue
-    
-    df_q = pd.read_csv(quest_fname, sep=None, engine="python", index_col=None, encoding="utf-8-sig")
-    df_a = pd.read_csv(audio_fname, sep=None, engine="python", index_col=None, encoding="utf-8-sig")
+    kwargs = dict(sep=None, engine="python", index_col=None, encoding="utf-8-sig")
+    df_q = pd.read_csv(quest_fname, **kwargs)
+    df_a = pd.read_csv(audio_fname, **kwargs)
 
     df_q["site"] = site
 
@@ -126,6 +137,13 @@ for site in site_map.values():
     df_a.rename(columns={"Subject ID": "study_id"}, inplace=True)
     df_q["study_id"] = df_q["study_id"].astype(str)
     df_a["study_id"] = df_a["study_id"].astype(str)
+
+    if site_code == "GHE":
+        df_a["study_id"] = (
+                            pd.to_numeric(df_a["study_id"], errors="coerce")
+                            .astype("Int64")
+                            .astype(str)
+                        )
 
     for new_col, cols in avg_pairs.items():
         df_a[new_col] = df_a[cols].mean(axis=1)
