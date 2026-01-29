@@ -15,6 +15,46 @@ def harmonize(
                 saving_dir,
                 features_dir
                 ):
+    """
+    Harmonize subject-level neurophysiological features across acquisition sites
+    using neuroHarmonize (ComBat-style empirical Bayes correction).
+
+    This function:
+    1. Loads subject-wise feature files matching the specified preprocessing level,
+        space, and modality.
+    2. Aggregates features per subject (mean across channels / connections).
+    3. Merges features with subject covariates (site, age, sex, PTA4_mean, group).
+    4. Learns a harmonization model on control subjects only (group == 0).
+    5. Applies the learned model to all subjects.
+    6. Saves both harmonized data ("hm") and residualized data ("residual") as CSVs.
+
+    Parameters
+    ----------
+    preproc_level : int
+        Preprocessing level identifier used in feature filenames.
+    space : str
+        Feature space (e.g., "sensor" or "source").
+    modality : str
+        Feature modality (e.g., "power", "conn", "aperiodic").
+    conn_mode : str
+        Connectivity metric (e.g., "pli", "plv", "coh").
+        Only used when modality == "conn".
+    saving_dir : pathlib.Path
+        Base directory where harmonized CSV files will be saved.
+    features_dir : pathlib.Path
+        Directory containing extracted feature files.
+
+    Notes
+    -----
+    - Subject IDs are inferred from filenames.
+    - Covariates are loaded from '../material/master.csv'.
+    - Site effects are harmonized while preserving biological covariates
+        (age, sex, PTA4_mean).
+    - For 'aperiodic' modality, no harmonization is applied; merged data
+        are saved directly for consistency.
+    - Output filenames encode preprocessing level, space, modality,
+        and (if applicable) connectivity mode.
+    """
 
     ## get file names
     fnames = []
@@ -125,7 +165,7 @@ if __name__ == "__main__":
     
     preproc_levels = [2]
     spaces = ["sensor", "source"][1:]
-    modalities = ["power", "conn", "aperiodic"][2:]
+    modalities = ["power", "conn", "aperiodic"][:1]
     conn_modes = ["pli", "plv", "coh"][2:]
 
     for preproc_level in preproc_levels:
