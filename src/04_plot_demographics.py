@@ -8,12 +8,14 @@ hues = ["group", "sex"]
 df = pd.read_csv("../material/master.csv")
 df_plot = df[["site", "sex", "age", "group"]]
 
+df_plot["sex"] = df_plot["sex"].map({1: "Male", 2: "Female"})
+df_plot["group"] = df_plot["group"].map({0: "Control", 1: "Tinnitus"})
 
 site_names = df_plot["site"].unique()
 print(site_names)
 pal = [
-        sns.cubehelix_palette(3, rot=-.2, light=.7).as_hex()[1],
-        sns.color_palette("ch:s=-.2,r=.6", as_cmap=False).as_hex()[2]
+        sns.cubehelix_palette(3, rot=-.1, light=.2).as_hex()[1],
+        sns.color_palette("ch:s=-.2,r=.8", as_cmap=False).as_hex()[2]
 ]
 
 xlim = [5, 80]
@@ -35,8 +37,8 @@ for hue in hues:
 
         g.figure.subplots_adjust(hspace=.15, top=0.72)
         g.set_titles("")
-        g.add_legend()
-        g.set(yticks=[], ylabel="", xlabel=r"age, sex")
+        g.add_legend(title="")
+        g.set(yticks=[], ylabel="", xlabel=r"Age")
         g.despine(bottom=True, left=True)
         g.figure.savefig(saving_dir / f"{hue}_distribution.pdf", 
                         format="pdf",       
