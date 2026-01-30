@@ -20,8 +20,8 @@ def run_centile_plot(
     tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
     hm_dir = tinnorm_dir / "harmonized"
     models_dir = tinnorm_dir / "models"
-    model_dir = models_dir / f"{mode}_{space}_preproc_{preproc_level}" / "full_model"
-    fname_feature = hm_dir / f"{mode}_{space}_preproc_{preproc_level}_hm.csv"
+    model_dir = models_dir / f"preproc_{preproc_level}" / space / mode / "full_model"
+    fname_feature = hm_dir / f"preproc_{preproc_level}" / space / f"{mode}_hm.csv"
 
     ## load model and re-create norm data 
     model = NormativeModel.load(str(model_dir))
@@ -37,11 +37,13 @@ def run_centile_plot(
                 how="inner"
                 )
     df.drop(columns=["Unnamed: 0"], inplace=True, errors="ignore")
+    demographic_cols = ["subject_id", "SITE", "group", "age", "sex", "PTA4_mean"]
+    response_cols = df.columns.difference(demographic_cols).tolist()
 
     kwargs = {
-                    "covariates": ["age", "sex", "PTA4_mean"],
+                    "covariates": demographic_cols[-3:],
                     "batch_effects": ["SITE"],
-                    "response_vars": [c for c in df.columns[:-6] if c.endswith(f"alpha_1")], # list(df.columns[:-6])
+                    "response_vars": response_cols,
                     "subject_ids": "subject_id"
                     }
 
@@ -61,7 +63,15 @@ def run_centile_plot(
     if data_mode == "test":
         scatter_data = norm_test_tinnitus
 
-    bls = [f"{bl}_{frequency}" for bl in brain_labels]
+    if mode == "aperiodic":
+        bls_1 = [f"{bl}_exponent" for bl in brain_labels]
+        bls_2 = [f"{bl}_offset" for bl in brain_labels]
+        bls = bls_1 + bls_2
+    
+    elif mode == "conn": ## could be modified
+        bls = []
+    else: 
+        bls = [f"{bl}_{frequency}" for bl in brain_labels]
 
     figs, re_vars = plot_centiles_advanced(
                             model,
@@ -76,7 +86,10 @@ def run_centile_plot(
                             )
 
     for fig, re_var in zip(figs, re_vars):
-        fname_save = tinnorm_dir / "plots" / f"centiles_{covar}_{data_mode}_{re_var}.pdf"
+        saving_dir = tinnorm_dir / "plots" / "centiles"
+        saving_dir.mkdir(parents=True, exist_ok=True)
+
+        fname_save = saving_dir / f"{mode}_{covar}_{data_mode}_{re_var}_preproc_level_{preproc_level}.pdf"
         fig.savefig(
                     fname_save,
                     format="pdf",
@@ -87,7 +100,7 @@ def run_centile_plot(
 
 if __name__ == "__main__":
 
-    mode = "power"
+    mode = "aperiodic"
     space = "source"
     preproc_level = 2
     covar = "age" # "PTA4_mean"
