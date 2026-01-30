@@ -230,13 +230,10 @@ if __name__ == "__main__":
 
         tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
         models_dir = tinnorm_dir / "models"
-        model_dir = models_dir / f"{mode}_{space}_preproc_{preproc_level}" / "for_eval"
-
-        saving_dir = tinnorm_dir / "plots"
+        model_dir = models_dir / f"preproc_{preproc_level}" / space / f"{mode}" / "for_eval"
         ev_fname = model_dir / "results" / f"statistics_train_{data_mode}.csv"
 
         pal = sns.color_palette("Purples", n_colors=200)
-
         fig_dist = plot_dist(ev_fname)
         fig_brain = plot_brain(
                         ev_fname,
@@ -248,14 +245,20 @@ if __name__ == "__main__":
                         subjects_dir=None,
                         alpha=0.7,
                         )
-
         kwargs = {
                 "format": "pdf",
                 "dpi": 300,
                 "bbox_inches": "tight"
                 }
-        for fig, title in zip([fig_dist, fig_brain], ["dist", "brain"]):
+        
+        for fig, plot_mode in zip([fig_dist, fig_brain], ["distribution", "brain"]):
+                saving_dir = tinnorm_dir / "plots" / "evaluation" / plot_mode
+                saving_dir.mkdir(parents=True, exist_ok=True)
+
                 fig.savefig(
-                        saving_dir / f"{title}_{mode}_{metric}_{data_mode}_{freq_band}_preproc_level_{preproc_level}.pdf",
+                        saving_dir / f"{mode}_{metric}_{data_mode}_{freq_band}_preproc_level_{preproc_level}.pdf",
                         **kwargs
                         )
+
+## maybe later add a plot showing connection evaluation
+## fix vlim for long range distributions
