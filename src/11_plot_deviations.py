@@ -372,7 +372,7 @@ def map_roi_to_yeo7():
         }
         return roi_to_yeo7
 
-def save_plot(metric_vals, prefix, extra=None):
+def save_plot(metric_vals, prefix, saving_dir, extra=None):
         """Helper to plot and save one or multiple figures."""
         figs = plot_func(metric_vals=metric_vals, palette=palette)
 
@@ -386,6 +386,7 @@ def save_plot(metric_vals, prefix, extra=None):
                 parts.extend([data_mode, freq_band, f"preproc_level_{preproc_level}"])
                 if len(figs) > 1:
                         parts.append(f"fig{i+1}")
+                
                 fname = saving_dir / "_".join(parts)
                 fig.savefig(fname.with_suffix(".pdf"), **fig_kwargs)
 
@@ -393,11 +394,11 @@ if __name__ == "__main__":
         
         ## find and read the deviation file
         space = "source"
-        mode = "conn"
+        mode = "power"
         preproc_level = 2
         data_mode = "test"
         freq_band = "alpha_1"
-        conn_mode = "pli" # "pli"
+        conn_mode = None #"pli" # "pli"
         thr = 1.96
 
         pal_1 = color_palette("Purples", n_colors=200)
@@ -410,20 +411,21 @@ if __name__ == "__main__":
         
         tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
         models_dir = tinnorm_dir / "models"
-        saving_dir = tinnorm_dir / "plots"
-        
+        saving_dir = tinnorm_dir / "plots" / "deviations"
+        saving_dir.mkdir(parents=True, exist_ok=True)
+
         valid_conn_modes = ["conn", "global", "regional"]
         if (mode in valid_conn_modes) != (conn_mode is not None):
                 raise ValueError("Invalid combination of mode and conn_mode.")
 
         if mode in valid_conn_modes:
-                model_fname = f"{mode}_{space}_preproc_{preproc_level}_{conn_mode}"
+                model_dir = models_dir / f"preproc_{preproc_level}" / space / f"{mode}_{conn_mode}"
                 regex = f"{freq_band}_{conn_mode}"      
         else:
-                model_fname = f"{mode}_{space}_preproc_{preproc_level}"
+                model_dir = models_dir / f"preproc_{preproc_level}" / space / mode
                 regex = f"{freq_band}" 
 
-        results_dir = models_dir / model_fname / "full_model" / "results"
+        results_dir = model_dir / "full_model" / "results"
         fname = results_dir / f"Z_{data_mode}.csv"
                 
         df = pd.read_csv(fname)
@@ -447,8 +449,8 @@ if __name__ == "__main__":
                 palette = pal_1
                 extra_id = None
 
-        save_plot(df.mean().values, "Avg_Dev", extra_id)
+        save_plot(df.mean().values, "Avg_Dev", saving_dir, extra_id)
 
         for dev_mode in df_extreme.index:  # iterate rows
-                save_plot(df_extreme.loc[dev_mode].values, dev_mode, extra_id)
+                save_plot(df_extreme.loc[dev_mode].values, dev_mode, saving_dir, extra_id)
         
