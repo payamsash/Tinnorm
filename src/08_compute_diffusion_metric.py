@@ -19,13 +19,13 @@ def compute_diffusion_scores(
     dfs_all = []
     for mode in modes:
         if mode == "power":
-            model_name = f"{mode}_{space}_preproc_{preproc_level}"
+            model_dir = models_dir / f"preproc_{preproc_level}" / space / mode
         else:
-            model_name = f"{mode}_{space}_preproc_{preproc_level}_{conn_mode}"
+            model_dir = models_dir / f"preproc_{preproc_level}" / space / f"{mode}_{conn_mode}"
 
         dfs_group = []
         for group_name, group_id in zip(["train", "test"], [0, 1]):
-            fname = models_dir / model_name / "full_model" / "results" / f"Z_{group_name}.csv" 
+            fname = model_dir / "full_model" / "results" / f"Z_{group_name}.csv" 
             df = pd.read_csv(fname)
             df["group"] = [group_id] * len(df)
             dfs_group.append(df)
@@ -76,6 +76,7 @@ def compute_diffusion_scores(
     os.makedirs(tinnorm_dir / "diffusive", exist_ok=True)
     df_md.to_csv(tinnorm_dir / "diffusive" / fname_save)
 
+    print("********** computed and saved ************")
 
 if __name__ == "__main__":
 
