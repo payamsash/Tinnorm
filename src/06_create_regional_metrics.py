@@ -8,8 +8,8 @@ def compute_regional_metrics(
                             space,
                             conn_mode,
                             preproc_level,
-                            suffix,
-                            hm_dir
+                            hm_mode,
+                            saving_dir
                             ):
     """
     Compute regional and global (node strength) connectivity metrics
@@ -30,7 +30,7 @@ def compute_regional_metrics(
         Connectivity metric (e.g., "pli", "plv", etc.).
     preproc_level : int
         Preprocessing level identifier.
-    suffix : str
+    hm_mode : str
         harmonized or residual
     hm_dir : pathlib.Path
         Path to the harmonized data directory.
@@ -43,7 +43,7 @@ def compute_regional_metrics(
     """
 
     print("Loading connectivity and adjacency data...")
-    df_conn = pd.read_csv(hm_dir / f"conn_{space}_preproc_{preproc_level}_{conn_mode}_{suffix}.csv")
+    df_conn = pd.read_csv(saving_dir / f"conn_{conn_mode}_{hm_mode}.csv")
     df_adj = pd.read_csv("../material/aparc_adjacency.csv")
     df_adj.drop(columns="Unnamed: 0", inplace=True)
 
@@ -108,8 +108,8 @@ def compute_regional_metrics(
     df_nss = pd.concat([df_nss, df_conn[cols]], axis=1)
 
     ## save it in harmonized folder path
-    for df, title in zip([df_res, df_nss], ["regional", "global"]):
-        df.to_csv(hm_dir / f"{title}_{space}_preproc_{preproc_level}_{conn_mode}_{suffix}.csv")
+    for df, reg_mode in zip([df_res, df_nss], ["regional", "global"]):
+        df.to_csv(saving_dir / f"{reg_mode}_{conn_mode}_{hm_mode}.csv", index=False)
     
     print("All computations completed and saved successfully!")
 
@@ -122,15 +122,16 @@ if __name__ == "__main__":
     preproc_levels = [2]
     spaces = ["sensor", "source"][1:]
     conn_modes = ["pli", "plv", "coh"][2:]
-    suffixes = ["hm", "residual"]
-
+    hm_modes = ["hm", "residual"]
 
     for preproc_level in preproc_levels:
         for space in spaces:
             for conn_mode in conn_modes:
-                for suffix in suffixes:
-                    fname_save = hm_dir / f"conn_{space}_preproc_{preproc_level}_{suffix}.csv"
-                
+                for hm_mode in hm_modes:
+
+                    saving_dir = hm_dir / f"preproc_{preproc_level}" / space
+                    fname_save = saving_dir / f"conn_{hm_mode}.csv"
+
                     if fname_save.exists():
                         continue
                     else:
@@ -138,9 +139,6 @@ if __name__ == "__main__":
                                                 space,
                                                 conn_mode,
                                                 preproc_level,
-                                                suffix,
-                                                hm_dir
+                                                hm_mode,
+                                                saving_dir
                                                 )
-                        
-
-## add the 6 columns here
