@@ -5,8 +5,11 @@ import numpy as np
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
-from sklearn.model_selection import GroupKFold
 from sklearn.feature_selection import RFE
+from sklearn.model_selection import (
+    GroupKFold,
+    StratifiedKFold
+    )
 from sklearn.metrics import (
     balanced_accuracy_score,
     precision_score,
@@ -32,11 +35,11 @@ def _read_the_file(
 
     ## Residual data
     if data_mode == "residual":
-        mode_prefix = f"{mode}_{space}_preproc_{preproc_level}"
-        if mode in ["conn", "global", "regional"]:
+        mode_prefix = ""
+        if mode in ["conn", "global", "regional", "diffusive"]:
             mode_prefix += f"_{conn_mode}"
 
-        fname = hm_dir / f"{mode_prefix}_residual.csv"
+        fname = hm_dir / f"preproc_{preproc_level}" / space / f"{mode_prefix}_residual.csv"
         df = pd.read_csv(fname)
 
         if not thi_threshold is None:
@@ -52,13 +55,21 @@ def _read_the_file(
         
     ## Deviation data
     if data_mode == "deviation":
-        mode_prefix = f"{mode}_{space}_preproc_{preproc_level}"
-        if mode in ["conn", "global", "regional"]:
+        mode_prefix = ""
+        if mode in ["conn", "global", "regional", "diffusive"]:
             mode_prefix += f"_{conn_mode}"
         
         dfs_group = []
         for group_name, group_id in zip(["train", "test"], [0, 1]):
-            fname = models_dir / mode_prefix / "full_model" / "results" / f"Z_{group_name}.csv"
+            fname = (
+                        models_dir
+                        / f"preproc_{preproc_level}"
+                        / space
+                        / f"{mode}{mode_prefix}"
+                        / "full_model"
+                        / "results"
+                        / f"Z_{group_name}.csv"
+                    )
             df_group = pd.read_csv(fname)
             df_group["group"] = group_id
             dfs_group.append(df_group)
@@ -79,7 +90,6 @@ def _read_the_file(
 
         df.sort_values("subject_id", inplace=True)
         df.drop(columns=["observations", "subject_id", "thi_score"], inplace=True, errors="ignore")
-
     
     y = df["group"].to_numpy()         
     sites = df["SITE"].to_numpy()
@@ -133,9 +143,9 @@ def _initiate_rfe_model(base_model, n_features_to_select=None, step=1):
 
 
 
-def _run_permutation(X_np, y, sites, model, ml_model, n_permutations):
+def _run_permutation(X_np, y, sites, model, ml_model, n_permutations, folding_mode):
 
-    y_pred, y_prob = run_loso_cv(X_np, y, sites, model)
+    y_pred, y_prob = run_cv(X_np, y, sites, model)
     df_metric = metrics_to_dataframe(
         model_name=f"{ml_model}_real",
         y=y,
@@ -146,7 +156,7 @@ def _run_permutation(X_np, y, sites, model, ml_model, n_permutations):
     rng = np.random.default_rng(42)
     for i in tqdm(range(n_permutations)):
         y_perm = rng.permutation(y)
-        y_pred_p, y_prob_p = run_loso_cv(X_np, y_perm, sites, model)
+        y_pred_p, y_prob_p = run_cv(X_np, y_perm, sites, model, folding_mode)
         df_p = metrics_to_dataframe(
             model_name=f"{ml_model}_perm_{i+1}",
             y=y_perm,
@@ -183,10 +193,12 @@ def metrics_to_dataframe(model_name, y, y_pred, y_prob=None):
         "roc_auc": [auc]
     })
 
-def run_loso_cv(X, y, sites, model):
+def run_cv(X, y, sites, model, folding_mode):
     
-    gkf = GroupKFold(n_splits=len(np.unique(sites))) # LOSO
-    # gkf = StratifiedKFold(n_splits=10, shuffle=True) # normal
+    if folding_mode == "loso":
+        gkf = GroupKFold(n_splits=len(np.unique(sites))) # LOSO
+    if folding_mode == "stratified":
+        gkf = StratifiedKFold(n_splits=5, shuffle=True) # normal
 
     y_pred = np.zeros_like(y)
     y_prob = np.zeros(len(y))
@@ -213,7 +225,7 @@ def run_loso_cv_with_folds(X, y, sites, model):
     return fold_true, fold_probs
 
 
-def _run_comparison(X_1, X_2, y, y_2, sites, sites_2, model, n_permutations):
+def _run_comparison(X_1, X_2, y, y_2, sites, sites_2, model, n_permutations, folding_mode):
 
     # checks
     if not np.array_equal(y, y_2):
@@ -228,8 +240,8 @@ def _run_comparison(X_1, X_2, y, y_2, sites, sites_2, model, n_permutations):
     print("✔ y and sites match across residual and deviation data.")
 
     # Run LOSO-CV for both feature sets 
-    y_pred_1, y_prob_1 = run_loso_cv(X_1, y, sites, model)
-    y_pred_2, y_prob_2 = run_loso_cv(X_2, y, sites, model)
+    y_pred_1, y_prob_1 = run_cv(X_1, y, sites, model, folding_mode)
+    y_pred_2, y_prob_2 = run_cv(X_2, y, sites, model, folding_mode)
 
     # Metrics tables
     df_X1 = metrics_to_dataframe("X1", y, y_pred_1, y_prob_1)
@@ -267,26 +279,36 @@ def _run_comparison(X_1, X_2, y, y_2, sites, sites_2, model, n_permutations):
 
 
 def classify(
+        tinnorm_dir,
         data_mode,
+        preproc_level,
         space, 
         mode,
-        freq_band,
-        preproc_level,
         conn_mode,
+        freq_band,
+        folding_mode,
         high_corr_drop,
         corr_thr,
         ml_model,
         n_jobs,
         run_permutation=False,
+        n_permutations=100,
         run_comparison=False,
         apply_rfe=False,
-        n_permutations=100,
-        thi_threshold=None,
         n_rfe_features=100,
+        thi_threshold=None,
     ):
 
-    tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")    
-    X, y, sites = _read_the_file(data_mode, tinnorm_dir, mode, space, freq_band, preproc_level, conn_mode, thi_threshold)
+    X, y, sites = _read_the_file(
+                                data_mode,
+                                tinnorm_dir,
+                                mode,
+                                space,
+                                freq_band,
+                                preproc_level,
+                                conn_mode,
+                                thi_threshold
+                                )
 
     ## remove highly correlated features
     if high_corr_drop:
@@ -305,16 +327,16 @@ def classify(
         n_select = min(n_rfe_features, X_1.shape[1] // 2)
         print(f"Applying RFE: selecting top {n_select} features")
         
-        if mode == "power":
-            step = 20
         if mode == "conn":
-            step = 100
+            step = 200
+        else:
+            step = 20
 
         model = _initiate_rfe_model(model, n_features_to_select=n_select, step=step)
     
     ## permutation test
     if run_permutation:
-        df_metric = _run_permutation(X_1, y, sites, model, ml_model, n_permutations)
+        df_metric = _run_permutation(X_1, y, sites, model, ml_model, n_permutations, folding_mode)
         return df_metric
 
     # compare features
@@ -347,46 +369,64 @@ def classify(
     if run_comparison: 
         df_metric.at[1, "data_mode"] = "deviation"
         
-        return df_metric, y, y_prob_1, y_prob_2, delta_null, real_delta, p_value, y1_folds, p1_folds, y2_folds, p2_folds
+        return (
+                df_metric,
+                y,
+                y_prob_1,
+                y_prob_2,
+                delta_null,
+                real_delta,
+                p_value,
+                y1_folds,
+                p1_folds,
+                y2_folds,
+                p2_folds,
+            )
     else:
         if run_permutation:
             return df_metric
 
 
-
 if __name__ == "__main__":
+    
+    tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
+    kwargs = dict(
+                    data_mode = "residual",
+                    preproc_level = 2,
+                    space = "source",
+                    mode = "power",
+                    conn_mode = "coh",
+                    freq_band = "alpha_1",
+                    folding_mode = "stratified",
+                    high_corr_drop = False,
+                    corr_thr = 0.95,
+                    ml_model = "RF",
+                    n_jobs=-1,
+                    run_permutation = False,
+                    n_permutations = 10,
+                    run_comparison = True,
+                    apply_rfe = False,
+                    n_rfe_features = 100,
+                    thi_threshold = 30
+                    )
+    
+    if not kwargs["mode"] in ["conn", "regional", "global", "diffusive"]:
+        if not isinstance(kwargs["conn_mode"], None):
+            raise ValueError(f"conn_mode must be None, got {kwargs['conn_mode']} instead.")
+        
+    if kwargs["mode"] == "aperiodic" and not isinstance(kwargs["freq_band"], None):
+        raise ValueError(f"freq_band must be None, got {kwargs['freq_band']} instead.")
 
-
-    data_mode = "residual"
-    space = "source"
-    mode = "power"
-    preproc_level = 2
-    conn_mode = "coh" 
-    high_corr_drop = False
-    corr_thr = 0.95
-    ml_model = "RF"
-    n_jobs=-1 
 
     df_metric, y, y_prob_1, y_prob_2, \
         delta_null, real_delta, p_value, \
             y1_folds, p1_folds, y2_folds, p2_folds = \
-                classify(
-                        data_mode,
-                        space, 
-                        mode,
-                        preproc_level,
-                        conn_mode,
-                        high_corr_drop,
-                        corr_thr,
-                        ml_model,
-                        n_jobs,
-                        run_permutation=False,
-                        run_comparison=True,
-                        apply_rfe=False,
-                        n_permutations=10,
-                        thi_threshold=30,
-                        n_rfe_features=100
-                        )
+                                        classify(
+                                                tinnorm_dir,
+                                                **kwargs
+                                                )
 
     ## add saving options
-    ## must create folders
+    ## add hyper parameter tuning
+    ## from simplest to most complicated
+    ## must create folders for saving necessary stuff
