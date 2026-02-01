@@ -18,6 +18,24 @@ from sklearn.metrics import (
     roc_auc_score
 )
 
+from dataclasses import dataclass
+from typing import Optional
+
+@dataclass
+class ClassificationResult:
+    df_metric: pd.DataFrame
+    y: Optional[np.ndarray] = None
+    y_prob_1: Optional[np.ndarray] = None
+    y_prob_2: Optional[np.ndarray] = None
+    delta_null: Optional[np.ndarray] = None
+    real_delta: Optional[np.ndarray] = None
+    p_value: Optional[float] = None
+    y1_folds: Optional[np.ndarray] = None
+    p1_folds: Optional[np.ndarray] = None
+    y2_folds: Optional[np.ndarray] = None
+    p2_folds: Optional[np.ndarray] = None
+
+
 def _read_the_file(
                 data_mode,
                 tinnorm_dir,
@@ -277,6 +295,35 @@ def _run_comparison(X_1, X_2, y, y_2, sites, sites_2, model, n_permutations, fol
 
     return  df_metric, y, y_prob_1, y_prob_2, delta_null, real_delta, p_value
 
+def save_clf_result(res, clfs_dir):
+
+    clfs_dir.mkdir(parents=True, exist_ok=True)
+    metrics_path = clfs_dir / "metrics" / f"metrics.csv"
+    metrics_path.parent.mkdir(parents=True, exist_ok=True)
+    res.df_metric.to_csv(metrics_path, index=False)
+
+    # comparison
+    if res.p_value is None:
+        return
+
+    comp_dir = clfs_dir / "comparison"
+    comp_dir.mkdir(parents=True, exist_ok=True)
+
+    arrays = {
+        "y": res.y,
+        "y_prob_1": res.y_prob_1,
+        "y_prob_2": res.y_prob_2,
+        "delta_null": res.delta_null,
+        "real_delta": res.real_delta,
+        "y1_folds": res.y1_folds,
+        "p1_folds": res.p1_folds,
+        "y2_folds": res.y2_folds,
+        "p2_folds": res.p2_folds,
+        "p_value": res.p_value
+    }
+
+    for name, arr in arrays.items():
+        np.save(comp_dir / f"{name}.npy", arr)
 
 def classify(
         tinnorm_dir,
@@ -369,27 +416,26 @@ def classify(
     if run_comparison: 
         df_metric.at[1, "data_mode"] = "deviation"
         
-        return (
-                df_metric,
-                y,
-                y_prob_1,
-                y_prob_2,
-                delta_null,
-                real_delta,
-                p_value,
-                y1_folds,
-                p1_folds,
-                y2_folds,
-                p2_folds,
-            )
-    else:
-        if run_permutation:
-            return df_metric
+        return ClassificationResult(
+                                    df_metric=df_metric,
+                                    y=y,
+                                    y_prob_1=y_prob_1,
+                                    y_prob_2=y_prob_2,
+                                    delta_null=delta_null,
+                                    real_delta=real_delta,
+                                    p_value=p_value,
+                                    y1_folds=y1_folds,
+                                    p1_folds=p1_folds,
+                                    y2_folds=y2_folds,
+                                    p2_folds=p2_folds,
+                                )
+    return ClassificationResult(df_metric=df_metric)
 
 
 if __name__ == "__main__":
     
     tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
+    clfs_dir = tinnorm_dir / "clfs"
     kwargs = dict(
                     data_mode = "residual",
                     preproc_level = 2,
@@ -416,15 +462,12 @@ if __name__ == "__main__":
         
     if kwargs["mode"] == "aperiodic" and not isinstance(kwargs["freq_band"], None):
         raise ValueError(f"freq_band must be None, got {kwargs['freq_band']} instead.")
+    
+    ## run_permutation, run_comparison only one must be true and other false
 
 
-    df_metric, y, y_prob_1, y_prob_2, \
-        delta_null, real_delta, p_value, \
-            y1_folds, p1_folds, y2_folds, p2_folds = \
-                                        classify(
-                                                tinnorm_dir,
-                                                **kwargs
-                                                )
+    res = classify(tinnorm_dir, **kwargs)
+    save_clf_result(res, clfs_dir)
 
     ## add saving options
     ## add hyper parameter tuning
