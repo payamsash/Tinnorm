@@ -456,20 +456,27 @@ if __name__ == "__main__":
                     thi_threshold = 30
                     )
     
-    if not kwargs["mode"] in ["conn", "regional", "global", "diffusive"]:
-        if not isinstance(kwargs["conn_mode"], None):
-            raise ValueError(f"conn_mode must be None, got {kwargs['conn_mode']} instead.")
-        
-    if kwargs["mode"] == "aperiodic" and not isinstance(kwargs["freq_band"], None):
-        raise ValueError(f"freq_band must be None, got {kwargs['freq_band']} instead.")
-    
-    ## run_permutation, run_comparison only one must be true and other false
+    ## some checks
+    mode = kwargs.get("mode")
+    conn_mode = kwargs.get("conn_mode")
+    freq_band = kwargs.get("freq_band")
+    run_permutation = kwargs.get("run_permutation", False)
+    run_comparison = kwargs.get("run_comparison", False)
 
+    valid_modes = ["conn", "regional", "global", "diffusive"]
+    if mode not in valid_modes:
+        if conn_mode is not None:
+            raise ValueError(f"conn_mode must be None when mode='{mode}', got {conn_mode} instead.")
 
+    if mode == "aperiodic" and freq_band is not None:
+        raise ValueError(f"freq_band must be None when mode='aperiodic', got {freq_band} instead.")
+
+    if run_permutation == run_comparison:
+        raise ValueError("Exactly one of run_permutation or run_comparison must be True.")
+
+    ## the real part!
     res = classify(tinnorm_dir, **kwargs)
     save_clf_result(res, clfs_dir)
 
-    ## add saving options
-    ## add hyper parameter tuning
     ## from simplest to most complicated
     ## must create folders for saving necessary stuff
