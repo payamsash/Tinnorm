@@ -243,13 +243,21 @@ def run_cv(X, y, sites, model, folding_mode):
     return y_pred, y_prob
 
 
-def run_loso_cv_with_folds(X, y, sites, model):
-    gkf = GroupKFold(n_splits=len(np.unique(sites)))
+def run_loso_cv_with_folds(X, y, sites, model, folding_mode):
+        
+    if folding_mode == "loso":
+        splitter = GroupKFold(n_splits=len(np.unique(sites)))
+
+    elif folding_mode == "stratified":
+        splitter = StratifiedGroupKFold(
+            n_splits=5,
+            shuffle=True,
+            random_state=42
+        )
     
     fold_probs = []
     fold_true = []
-
-    for train_idx, test_idx in gkf.split(X, y, groups=sites):
+    for train_idx, test_idx in splitter.split(X, y, groups=sites):
         model.fit(X[train_idx], y[train_idx])
         prob = model.predict_proba(X[test_idx])[:, 1]
         fold_probs.append(prob)
@@ -393,7 +401,7 @@ def classify(
     model = _initiate_ml_model(ml_model, n_jobs)
     X_1 = X.to_numpy()
     df_metric = pd.DataFrame()
-    y_pred = y_prob = None
+    y_prob = None
 
     ## apply RFE
     if apply_rfe:
@@ -440,8 +448,8 @@ def classify(
                 _run_comparison(X_1, X_2, y, y_2, sites, sites_2, model, n_permutations, folding_mode)
         
         ## get CI for the ROC curve by running LOSO with folds
-        y1_folds, p1_folds = run_loso_cv_with_folds(X_1, y, sites, model)
-        y2_folds, p2_folds = run_loso_cv_with_folds(X_2, y, sites, model)
+        y1_folds, p1_folds = run_loso_cv_with_folds(X_1, y, sites, model, folding_mode)
+        y2_folds, p2_folds = run_loso_cv_with_folds(X_2, y, sites, model, folding_mode)
 
     # add context columns to metrics
     if not df_metric.empty:
@@ -495,9 +503,9 @@ if __name__ == "__main__":
                     ml_model = "RF",
                     n_jobs=-1,
                     run_permutation = False,
-                    n_permutations = 3,
+                    n_permutations = 2,
                     run_comparison = True,
-                    apply_rfe = False,
+                    apply_rfe = True,
                     n_rfe_features = 100,
                     thi_threshold = None
                     )
@@ -509,6 +517,8 @@ if __name__ == "__main__":
     freq_band = kwargs.get("freq_band")
     run_permutation = kwargs.get("run_permutation", False)
     run_comparison = kwargs.get("run_comparison", False)
+    apply_rfe = kwargs.get("run_comparison", False)
+    n_permutations = kwargs.get("n_permutations", False)
 
     valid_modes = ["conn", "regional", "global", "diffusive"]
     if mode not in valid_modes:
@@ -526,6 +536,17 @@ if __name__ == "__main__":
                 f"data_mode must be set to 'residual' for comparison, got '{data_mode}' instead."
                 )
     
+    if apply_rfe and run_permutation:
+        if n_permutations > 5:
+            raise ValueError(
+                f"number of permutations should be less than 5, as the run time will increase significantly."
+                )
+        
+    if run_comparison and n_permutations != 1000 and not apply_rfe:
+        raise ValueError(
+                f"for comparison of two models n_permutations should be 1000, got {n_permutations} instead."
+                )
+    
     if run_permutation:
         run_mode = "permutation"
     elif run_comparison:
@@ -537,4 +558,6 @@ if __name__ == "__main__":
     print("****** saving results ******")
     save_clf_result(res, clfs_dir, run_mode)
 
-    ## from simplest to most complicated
+
+
+    ## add diffusive option
