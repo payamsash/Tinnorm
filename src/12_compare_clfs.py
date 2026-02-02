@@ -1,5 +1,6 @@
 from pathlib import Path
 from tqdm import tqdm
+from datetime import datetime
 import pandas as pd
 import numpy as np
 
@@ -268,7 +269,7 @@ def _run_comparison(X_1, X_2, y, y_2, sites, sites_2, model, n_permutations, fol
     if X_1.shape[0] != X_2.shape[0]:
         raise ValueError("X1 and X2 have different number of subjects.")
 
-    print("✔ y and sites match across residual and deviation data.")
+    print("y and sites match across residual and deviation data.")
 
     # Run LOSO-CV for both feature sets 
     y_pred_1, y_prob_1 = run_cv(X_1, y, sites, model, folding_mode)
@@ -308,10 +309,11 @@ def _run_comparison(X_1, X_2, y, y_2, sites, sites_2, model, n_permutations, fol
 
     return  df_metric, y, y_prob_1, y_prob_2, delta_null, real_delta, p_value
 
-def save_clf_result(res, clfs_dir):
+def save_clf_result(res, clfs_dir, run_mode):
 
     clfs_dir.mkdir(parents=True, exist_ok=True)
-    metrics_path = clfs_dir / "metrics" / f"metrics.csv"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    metrics_path = clfs_dir / run_mode / f"metrics_{timestamp}.csv"
     metrics_path.parent.mkdir(parents=True, exist_ok=True)
     res.df_metric.to_csv(metrics_path, index=False)
 
@@ -421,8 +423,8 @@ def classify(
     # add context columns
     if not df_metric.empty:
         len_df = len(df_metric)
-        col_names = ["mode", "space", "preproc_level", "conn_mode", "high_corr_drop", "data_mode"]
-        col_vals = [mode, space, preproc_level, conn_mode, high_corr_drop, data_mode]
+        col_names = ["mode", "space", "preproc_level", "conn_mode", "high_corr_drop", "data_mode", "folding_mode"]
+        col_vals = [mode, space, preproc_level, conn_mode, high_corr_drop, data_mode, folding_mode]
         for col_name, col_val in zip(col_names, col_vals):
             df_metric[col_name] = [col_val] * len_df
 
@@ -486,10 +488,15 @@ if __name__ == "__main__":
 
     if run_permutation == run_comparison:
         raise ValueError("Exactly one of run_permutation or run_comparison must be True.")
+    
+    if run_permutation:
+        run_mode = "permutation"
+    elif run_comparison:
+        run_mode = "comparison"
 
     ## the real part!
     res = classify(tinnorm_dir, **kwargs)
-    save_clf_result(res, clfs_dir)
+    save_clf_result(res, clfs_dir, run_mode)
 
     ## from simplest to most complicated
     ## must create folders for saving necessary stuff
