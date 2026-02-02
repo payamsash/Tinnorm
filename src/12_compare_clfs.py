@@ -361,6 +361,7 @@ def classify(
         thi_threshold=None,
     ):
 
+    params = locals()
     X, y, sites = _read_the_file(
                                 tinnorm_dir,
                                 data_mode,
@@ -423,8 +424,9 @@ def classify(
     # add context columns
     if not df_metric.empty:
         len_df = len(df_metric)
-        col_names = ["mode", "space", "preproc_level", "conn_mode", "high_corr_drop", "data_mode", "folding_mode"]
-        col_vals = [mode, space, preproc_level, conn_mode, high_corr_drop, data_mode, folding_mode]
+        col_names = list(params.keys())
+        col_vals  = list(params.values())
+
         for col_name, col_val in zip(col_names, col_vals):
             df_metric[col_name] = [col_val] * len_df
 
@@ -452,7 +454,7 @@ if __name__ == "__main__":
     tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
     clfs_dir = tinnorm_dir / "clfs"
     kwargs = dict(
-                    data_mode = "residual",
+                    data_mode = "deviation",
                     preproc_level = 2,
                     space = "source",
                     mode = "power",
