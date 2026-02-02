@@ -8,7 +8,7 @@ from sklearn.svm import SVC
 from sklearn.feature_selection import RFE
 from sklearn.model_selection import (
     GroupKFold,
-    StratifiedKFold
+    StratifiedGroupKFold
     )
 from sklearn.metrics import (
     balanced_accuracy_score,
@@ -37,8 +37,8 @@ class ClassificationResult:
 
 
 def _read_the_file(
-                data_mode,
                 tinnorm_dir,
+                data_mode,
                 mode,
                 space,
                 freq_band,
@@ -57,7 +57,7 @@ def _read_the_file(
         if mode in ["conn", "global", "regional", "diffusive"]:
             mode_prefix += f"_{conn_mode}"
 
-        fname = hm_dir / f"preproc_{preproc_level}" / space / f"{mode_prefix}_residual.csv"
+        fname = hm_dir / f"preproc_{preproc_level}" / space / f"{mode}{mode_prefix}_residual.csv"
         df = pd.read_csv(fname)
 
         if not thi_threshold is None:
@@ -111,13 +111,18 @@ def _read_the_file(
     
     y = df["group"].to_numpy()         
     sites = df["SITE"].to_numpy()
+
+    print("\n****************************************************")
     print(f"number of subjects are: {df['group'].value_counts()}")
+    print("****************************************************\n")
 
     if not freq_band is None:
         df = df.filter(regex=rf"{freq_band}")
     
     X = df[list(df.columns)[:-2]]
-    print(f"number of features are: {X.shape[1]}")
+    print("\n****************************************************")
+    print(f"number of selected features are: {X.shape[1]}")
+    print("****************************************************\n")
 
     return X, y, sites
 
@@ -159,11 +164,9 @@ def _initiate_rfe_model(base_model, n_features_to_select=None, step=1):
                     )
     return rfe_model
 
-
-
 def _run_permutation(X_np, y, sites, model, ml_model, n_permutations, folding_mode):
 
-    y_pred, y_prob = run_cv(X_np, y, sites, model)
+    y_pred, y_prob = run_cv(X_np, y, sites, model, folding_mode)
     df_metric = metrics_to_dataframe(
         model_name=f"{ml_model}_real",
         y=y,
@@ -172,6 +175,7 @@ def _run_permutation(X_np, y, sites, model, ml_model, n_permutations, folding_mo
     )
 
     rng = np.random.default_rng(42)
+    print("*************** running permutation tests ***************")
     for i in tqdm(range(n_permutations)):
         y_perm = rng.permutation(y)
         y_pred_p, y_prob_p = run_cv(X_np, y_perm, sites, model, folding_mode)
@@ -212,21 +216,30 @@ def metrics_to_dataframe(model_name, y, y_pred, y_prob=None):
     })
 
 def run_cv(X, y, sites, model, folding_mode):
-    
+
     if folding_mode == "loso":
-        gkf = GroupKFold(n_splits=len(np.unique(sites))) # LOSO
-    if folding_mode == "stratified":
-        gkf = StratifiedKFold(n_splits=5, shuffle=True) # normal
+        splitter = GroupKFold(n_splits=len(np.unique(sites)))
+
+    elif folding_mode == "stratified":
+        splitter = StratifiedGroupKFold(
+            n_splits=5,
+            shuffle=True,
+            random_state=42
+        )
+
+    else:
+        raise ValueError("folding_mode must be 'loso' or 'stratified'")
 
     y_pred = np.zeros_like(y)
     y_prob = np.zeros(len(y))
 
-    for train_idx, test_idx in gkf.split(X, y, groups=sites):
+    for train_idx, test_idx in splitter.split(X, y, groups=sites):
         model.fit(X[train_idx], y[train_idx])
         y_pred[test_idx] = model.predict(X[test_idx])
         y_prob[test_idx] = model.predict_proba(X[test_idx])[:, 1]
 
     return y_pred, y_prob
+
 
 def run_loso_cv_with_folds(X, y, sites, model):
     gkf = GroupKFold(n_splits=len(np.unique(sites)))
@@ -347,8 +360,8 @@ def classify(
     ):
 
     X, y, sites = _read_the_file(
-                                data_mode,
                                 tinnorm_dir,
+                                data_mode,
                                 mode,
                                 space,
                                 freq_band,
@@ -384,7 +397,7 @@ def classify(
     ## permutation test
     if run_permutation:
         df_metric = _run_permutation(X_1, y, sites, model, ml_model, n_permutations, folding_mode)
-        return df_metric
+        # return df_metric
 
     # compare features
     if run_comparison:
@@ -393,7 +406,7 @@ def classify(
                 f"data_mode must be set to 'residual' for comparison, got '{data_mode}' instead."
             )
         X_2, y_2, sites_2 = _read_the_file(
-            "deviation", tinnorm_dir, mode, space, freq_band, preproc_level, conn_mode, thi_threshold
+            tinnorm_dir, "deviation", mode, space, freq_band, preproc_level, conn_mode, thi_threshold
             )
         X_2 = X_2.to_numpy()
 
@@ -441,19 +454,19 @@ if __name__ == "__main__":
                     preproc_level = 2,
                     space = "source",
                     mode = "power",
-                    conn_mode = "coh",
+                    conn_mode = None,
                     freq_band = "alpha_1",
                     folding_mode = "stratified",
                     high_corr_drop = False,
                     corr_thr = 0.95,
                     ml_model = "RF",
                     n_jobs=-1,
-                    run_permutation = False,
+                    run_permutation = True,
                     n_permutations = 10,
-                    run_comparison = True,
+                    run_comparison = False,
                     apply_rfe = False,
                     n_rfe_features = 100,
-                    thi_threshold = 30
+                    thi_threshold = None
                     )
     
     ## some checks
