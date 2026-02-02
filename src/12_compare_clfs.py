@@ -1,5 +1,6 @@
 from pathlib import Path
 from tqdm import tqdm
+import pickle
 from datetime import datetime
 import pandas as pd
 import numpy as np
@@ -188,7 +189,7 @@ def _run_permutation(X_np, y, sites, model, ml_model, n_permutations, folding_mo
         )
         df_metric = pd.concat([df_metric, df_p], ignore_index=True)
     
-    return df_metric
+    return df_metric, y_pred, y_prob
 
 def metrics_to_dataframe(model_name, y, y_pred, y_prob=None):
     """Return a DataFrame with common classification metrics for a model."""
@@ -311,34 +312,38 @@ def _run_comparison(X_1, X_2, y, y_2, sites, sites_2, model, n_permutations, fol
 
 def save_clf_result(res, clfs_dir, run_mode):
 
-    clfs_dir.mkdir(parents=True, exist_ok=True)
+    ## create the saving dir
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    metrics_path = clfs_dir / run_mode / f"metrics_{timestamp}.csv"
-    metrics_path.parent.mkdir(parents=True, exist_ok=True)
-    res.df_metric.to_csv(metrics_path, index=False)
+    saving_dir = clfs_dir / run_mode / f"{timestamp}"
+    saving_dir.mkdir(parents=True, exist_ok=True)
+    res.df_metric.to_csv(saving_dir / "metrics.csv", index=False)
 
-    # comparison
-    if res.p_value is None:
-        return
+    if run_mode == "permutation":
+        arrays = {
+                "y": res.y,
+                "y_prob": res.y_prob_1,
+                }
 
-    comp_dir = clfs_dir / "comparison"
-    comp_dir.mkdir(parents=True, exist_ok=True)
-
-    arrays = {
-        "y": res.y,
-        "y_prob_1": res.y_prob_1,
-        "y_prob_2": res.y_prob_2,
-        "delta_null": res.delta_null,
-        "real_delta": res.real_delta,
-        "y1_folds": res.y1_folds,
-        "p1_folds": res.p1_folds,
-        "y2_folds": res.y2_folds,
-        "p2_folds": res.p2_folds,
-        "p_value": res.p_value
-    }
+    if run_mode == "comparison":
+        arrays = {
+            "y": res.y,
+            "y_prob_1": res.y_prob_1,
+            "y_prob_2": res.y_prob_2,
+            "delta_null": res.delta_null,
+            "real_delta": res.real_delta,
+            "y1_folds": res.y1_folds,
+            "p1_folds": res.p1_folds,
+            "y2_folds": res.y2_folds,
+            "p2_folds": res.p2_folds,
+            "p_value": res.p_value
+        }
 
     for name, arr in arrays.items():
-        np.save(comp_dir / f"{name}.npy", arr)
+        if name.endswith("folds"):
+            with open(saving_dir / f"{name}.pkl", "wb") as f:
+                pickle.dump(arr, f)
+        else:
+            np.save(saving_dir / f"{name}.npy", arr, allow_pickle=True)
 
 def classify(
         tinnorm_dir,
@@ -362,6 +367,8 @@ def classify(
     ):
 
     params = locals()
+    params.pop("tinnorm_dir")
+
     X, y, sites = _read_the_file(
                                 tinnorm_dir,
                                 data_mode,
@@ -382,46 +389,61 @@ def classify(
         print(f"*** {len(to_drop)} dropped from {X.shape[1]} features ***")
         print(f"*********************************************************")
 
+    ## initialize
     model = _initiate_ml_model(ml_model, n_jobs)
     X_1 = X.to_numpy()
     df_metric = pd.DataFrame()
+    y_pred = y_prob = None
 
+    ## apply RFE
     if apply_rfe:
         n_select = min(n_rfe_features, X_1.shape[1] // 2)
         print(f"Applying RFE: selecting top {n_select} features")
-        
         if mode == "conn":
             step = 200
         else:
             step = 20
-
         model = _initiate_rfe_model(model, n_features_to_select=n_select, step=step)
     
     ## permutation test
     if run_permutation:
-        df_metric = _run_permutation(X_1, y, sites, model, ml_model, n_permutations, folding_mode)
-        # return df_metric
+        df_metric, _, y_prob = _run_permutation(
+                                                    X_1,
+                                                    y,
+                                                    sites,
+                                                    model,
+                                                    ml_model,
+                                                    n_permutations,
+                                                    folding_mode
+                                                    )
 
     # compare features
+    y_prob_1 = y_prob_2 = delta_null = real_delta = p_value = None
+    y1_folds = p1_folds = y2_folds = p2_folds = None
+
     if run_comparison:
-        if data_mode != "residual":
-            raise ValueError(
-                f"data_mode must be set to 'residual' for comparison, got '{data_mode}' instead."
-            )
+        
         X_2, y_2, sites_2 = _read_the_file(
-            tinnorm_dir, "deviation", mode, space, freq_band, preproc_level, conn_mode, thi_threshold
-            )
+                                            tinnorm_dir,
+                                            "deviation",
+                                            mode,
+                                            space,
+                                            freq_band,
+                                            preproc_level,
+                                            conn_mode,
+                                            thi_threshold
+                                            )
         X_2 = X_2.to_numpy()
 
         df_metric, y, y_prob_1, y_prob_2, delta_null, \
             real_delta, p_value  = \
-                _run_comparison(X_1, X_2, y, y_2, sites, sites_2, model, n_permutations)
+                _run_comparison(X_1, X_2, y, y_2, sites, sites_2, model, n_permutations, folding_mode)
         
         ## get CI for the ROC curve by running LOSO with folds
         y1_folds, p1_folds = run_loso_cv_with_folds(X_1, y, sites, model)
         y2_folds, p2_folds = run_loso_cv_with_folds(X_2, y, sites, model)
 
-    # add context columns
+    # add context columns to metrics
     if not df_metric.empty:
         len_df = len(df_metric)
         col_names = list(params.keys())
@@ -430,6 +452,13 @@ def classify(
         for col_name, col_val in zip(col_names, col_vals):
             df_metric[col_name] = [col_val] * len_df
 
+    if run_permutation:
+        return ClassificationResult(
+                                    df_metric=df_metric,
+                                    y=y,
+                                    y_prob_1=y_prob
+                                    )
+    
     if run_comparison: 
         df_metric.at[1, "data_mode"] = "deviation"
         
@@ -446,7 +475,7 @@ def classify(
                                     y2_folds=y2_folds,
                                     p2_folds=p2_folds,
                                 )
-    return ClassificationResult(df_metric=df_metric)
+    
 
 
 if __name__ == "__main__":
@@ -454,26 +483,27 @@ if __name__ == "__main__":
     tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
     clfs_dir = tinnorm_dir / "clfs"
     kwargs = dict(
-                    data_mode = "deviation",
+                    data_mode = "residual",
                     preproc_level = 2,
                     space = "source",
                     mode = "power",
                     conn_mode = None,
-                    freq_band = "alpha_1",
+                    freq_band = None,
                     folding_mode = "stratified",
                     high_corr_drop = False,
                     corr_thr = 0.95,
                     ml_model = "RF",
                     n_jobs=-1,
-                    run_permutation = True,
-                    n_permutations = 10,
-                    run_comparison = False,
+                    run_permutation = False,
+                    n_permutations = 3,
+                    run_comparison = True,
                     apply_rfe = False,
                     n_rfe_features = 100,
                     thi_threshold = None
                     )
     
     ## some checks
+    data_mode = kwargs.get("data_mode")
     mode = kwargs.get("mode")
     conn_mode = kwargs.get("conn_mode")
     freq_band = kwargs.get("freq_band")
@@ -491,6 +521,11 @@ if __name__ == "__main__":
     if run_permutation == run_comparison:
         raise ValueError("Exactly one of run_permutation or run_comparison must be True.")
     
+    if run_comparison and data_mode == "deviation":
+        raise ValueError(
+                f"data_mode must be set to 'residual' for comparison, got '{data_mode}' instead."
+                )
+    
     if run_permutation:
         run_mode = "permutation"
     elif run_comparison:
@@ -498,7 +533,8 @@ if __name__ == "__main__":
 
     ## the real part!
     res = classify(tinnorm_dir, **kwargs)
+
+    print("****** saving results ******")
     save_clf_result(res, clfs_dir, run_mode)
 
     ## from simplest to most complicated
-    ## must create folders for saving necessary stuff
