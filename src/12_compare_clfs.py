@@ -53,14 +53,18 @@ def _read_the_file(
     models_dir = tinnorm_dir / "models"
     df_master = pd.read_csv("../material/master.csv")
 
-    ## Residual data
-    if data_mode == "residual":
-        mode_prefix = ""
-        if mode in ["conn", "global", "regional", "diffusive"]:
-            mode_prefix += f"_{conn_mode}"
-
-        fname = hm_dir / f"preproc_{preproc_level}" / space / f"{mode}{mode_prefix}_residual.csv"
+    if mode == "diffusive":
+        ## Diffusive data
+        fname = tinnorm_dir / mode / f"{space}_preproc_{preproc_level}_{conn_mode}.csv"
         df = pd.read_csv(fname)
+        df.rename(columns={"subject_ids": "subject_id"}, inplace=True)
+        df = df.merge(  
+                        df_master[['subject_id', 'site']],
+                        on='subject_id',
+                        how='left'
+                    )
+        df.rename(columns={"site": "SITE"}, inplace=True)
+
 
         if not thi_threshold is None:
             df = df.merge(
@@ -72,44 +76,65 @@ def _read_the_file(
 
         cols_to_drop = ["Unnamed: 0", "subject_id", "age", "sex", "PTA4_mean", "thi_score"]
         df.drop(columns=cols_to_drop, inplace=True, errors="ignore")
-        
-    ## Deviation data
-    if data_mode == "deviation":
-        mode_prefix = ""
-        if mode in ["conn", "global", "regional", "diffusive"]:
-            mode_prefix += f"_{conn_mode}"
-        
-        dfs_group = []
-        for group_name, group_id in zip(["train", "test"], [0, 1]):
-            fname = (
-                        models_dir
-                        / f"preproc_{preproc_level}"
-                        / space
-                        / f"{mode}{mode_prefix}"
-                        / "full_model"
-                        / "results"
-                        / f"Z_{group_name}.csv"
-                    )
-            df_group = pd.read_csv(fname)
-            df_group["group"] = group_id
-            dfs_group.append(df_group)
 
-        df = pd.concat(dfs_group, axis=0, ignore_index=True)
-        df.rename(columns={"subject_ids": "subject_id"}, inplace=True)
+    else:
+        ## Residual data
+        if data_mode == "residual":
+            mode_prefix = ""
+            if mode in ["conn", "global", "regional", "diffusive"]:
+                mode_prefix += f"_{conn_mode}"
 
-        df = df.merge(df_master[['subject_id', 'site']], on='subject_id', how='left')
-        df.rename(columns={"site": "SITE"}, inplace=True)
+            fname = hm_dir / f"preproc_{preproc_level}" / space / f"{mode}{mode_prefix}_residual.csv"
+            df = pd.read_csv(fname)
 
-        if not thi_threshold is None:
-            df = df.merge(
-                        df_master[['subject_id', 'thi_score']],
-                        on='subject_id',
-                        how='left'
-                    )
-            df = df.query(f'group == 0 or thi_score > {thi_threshold}')
+            if not thi_threshold is None:
+                df = df.merge(
+                            df_master[['subject_id', 'thi_score']],
+                            on='subject_id',
+                            how='left'
+                        )
+                df = df.query(f'group == 0 or thi_score > {thi_threshold}')
 
-        df.sort_values("subject_id", inplace=True)
-        df.drop(columns=["observations", "subject_id", "thi_score"], inplace=True, errors="ignore")
+            cols_to_drop = ["Unnamed: 0", "subject_id", "age", "sex", "PTA4_mean", "thi_score"]
+            df.drop(columns=cols_to_drop, inplace=True, errors="ignore")
+            
+        ## Deviation data
+        if data_mode == "deviation":
+            mode_prefix = ""
+            if mode in ["conn", "global", "regional", "diffusive"]:
+                mode_prefix += f"_{conn_mode}"
+            
+            dfs_group = []
+            for group_name, group_id in zip(["train", "test"], [0, 1]):
+                fname = (
+                            models_dir
+                            / f"preproc_{preproc_level}"
+                            / space
+                            / f"{mode}{mode_prefix}"
+                            / "full_model"
+                            / "results"
+                            / f"Z_{group_name}.csv"
+                        )
+                df_group = pd.read_csv(fname)
+                df_group["group"] = group_id
+                dfs_group.append(df_group)
+
+            df = pd.concat(dfs_group, axis=0, ignore_index=True)
+            df.rename(columns={"subject_ids": "subject_id"}, inplace=True)
+
+            df = df.merge(df_master[['subject_id', 'site']], on='subject_id', how='left')
+            df.rename(columns={"site": "SITE"}, inplace=True)
+
+            if not thi_threshold is None:
+                df = df.merge(
+                            df_master[['subject_id', 'thi_score']],
+                            on='subject_id',
+                            how='left'
+                        )
+                df = df.query(f'group == 0 or thi_score > {thi_threshold}')
+
+            df.sort_values("subject_id", inplace=True)
+            df.drop(columns=["observations", "subject_id", "thi_score"], inplace=True, errors="ignore")
     
     y = df["group"].to_numpy()         
     sites = df["SITE"].to_numpy()
@@ -121,7 +146,7 @@ def _read_the_file(
     if not freq_band is None:
         df = df.filter(regex=rf"{freq_band}")
     
-    X = df[list(df.columns)[:-2]]
+    X = df.drop(columns=["group", "SITE"])
     print("\n****************************************************")
     print(f"number of selected features are: {X.shape[1]}")
     print("****************************************************\n")
@@ -494,17 +519,17 @@ if __name__ == "__main__":
                     data_mode = "residual",
                     preproc_level = 2,
                     space = "source",
-                    mode = "power",
-                    conn_mode = None,
+                    mode = "diffusive",
+                    conn_mode = "coh",
                     freq_band = None,
                     folding_mode = "stratified",
                     high_corr_drop = False,
                     corr_thr = 0.95,
                     ml_model = "RF",
                     n_jobs=-1,
-                    run_permutation = False,
+                    run_permutation = True,
                     n_permutations = 2,
-                    run_comparison = True,
+                    run_comparison = False,
                     apply_rfe = True,
                     n_rfe_features = 100,
                     thi_threshold = None
@@ -535,6 +560,12 @@ if __name__ == "__main__":
         raise ValueError(
                 f"data_mode must be set to 'residual' for comparison, got '{data_mode}' instead."
                 )
+    
+    if mode == "diffusive" and conn_mode is None:
+        raise ValueError(
+                f"conn_mode must not be None, when mode is diffusive."
+                )
+
     
     if apply_rfe and run_permutation:
         if n_permutations > 5:
