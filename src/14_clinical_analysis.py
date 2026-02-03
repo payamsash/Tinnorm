@@ -1,9 +1,13 @@
 
 from pathlib import Path
 
-import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+from scipy.stats import pearsonr
+from statsmodels.stats.multitest import multipletests
+import matplotlib.pyplot as plt
 import seaborn as sns
+from seaborn import color_palette
 from umap import UMAP
 from sklearn.manifold import MDS
 
@@ -12,7 +16,8 @@ def _read_the_file(
                 space,
                 preproc_level,
                 conn_mode,
-                thi_threshold=None
+                thi_threshold=None,
+                only_extreme=False
                 ):
     
     tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
@@ -63,12 +68,12 @@ def _read_the_file(
     df.sort_values("subject_id", inplace=True)
     df.drop(columns=["Unnamed: 0", "observations", "subject_id"], inplace=True, errors="ignore")
 
+    if only_extreme:
+        raise NotImplementedError
+
     print("\n****************************************************")
     print(f"number of subjects are: {df['group'].value_counts()}")
     print("****************************************************\n")
-
-    print(df.columns)
-
     return df
 
 def plot_dm_results(
@@ -86,7 +91,8 @@ def plot_dm_results(
                         space,
                         preproc_level,
                         conn_mode,
-                        thi_threshold
+                        thi_threshold,
+                        only_extreme
                         )
 
     if not freq_band is None:
@@ -142,24 +148,100 @@ def plot_dm_results(
     ax.spines[["right", "top"]].set_visible(False)
     plt.show()
 
+def plot_corr_results(
+                    mode,
+                    space,
+                    preproc_level,
+                    conn_mode,
+                    freq_band,
+                    method,
+                    thi_threshold=None,
+                    ):
+
+    df = _read_the_file(
+                        mode,
+                        space,
+                        preproc_level,
+                        conn_mode,
+                        thi_threshold,
+                        only_extreme
+                        )
+    
+    if freq_band is not None:
+        df_features = df.filter(regex=rf"_{freq_band}")
+        df = pd.concat([df_features, df["thi_score"]], axis=1)
+    
+    df.dropna(inplace=True)
+    target_col = "thi_score"
+    other_cols = [c for c in df.columns if c not in ["group", "thi_score", "SITE"]]
+
+    results = []
+    for col in other_cols:
+        r, p = pearsonr(df[col], df[target_col])
+        results.append({"feature": col, "r": r, "pval": p})
+
+    results_df = pd.DataFrame(results)
+    results_df["pval_fdr"] = multipletests(results_df["pval"], method="fdr_bh")[1]
+
+    results_df = results_df.query('pval_fdr < 0.05')
+    if len(results_df) > 0:
+        cols = results_df["feature"]
+        pal = color_palette("Purples", n_colors=10)
+        color = pal[9]
+
+        for col in cols:
+            g = sns.jointplot(
+                    data=df,
+                    x="thi_score",
+                    y=col,
+                    kind="reg",
+                    height=5,
+                    scatter_kws = {"s": 20, "color": color},
+                    line_kws = {"linestyle": "--", "linewidth": 2, "color": "grey"},
+                    marginal_kws={"bins": 25, "fill": False, "color": color}
+                    )
+            
+            r = results_df.loc[results_df['feature'] == col, 'r'].values[0]
+            pval = results_df.loc[results_df['feature'] == col, 'pval_fdr'].values[0]
+            textstr = f"R = {r:.3f}\npval = {pval:.3f}"
+            g.ax_joint.text(
+                            0.7, 0.98,                    
+                            textstr,
+                            transform=g.ax_joint.transAxes,
+                            fontsize=10,
+                            fontstyle='italic',            
+                            verticalalignment='top',       
+                            horizontalalignment='left'  
+                        )
+            plt.show()
+    else:
+        print("********** nothing survived multiple comparison **********")
+
+
+
 if __name__ == "__main__":
 
     mode = "diffusive"
     space = "source"
     preproc_level = 2
     conn_mode = "coh"
+    freq_band = "beta_1"
     method = "umap" 
-    freq_band = "alpha_1"
+    thi_threshold = None
+    only_extreme = False
 
-    plot_dm_results(mode,
-                    space,
-                    preproc_level,
-                    conn_mode,
-                    freq_band,
-                    method,
-                    thi_threshold=None
-                    )
+    kwargs = {
+            "mode": mode,
+            "space": space,
+            "preproc_level": preproc_level,
+            "conn_mode": conn_mode,
+            "freq_band": freq_band,
+            "method": method,
+            "thi_threshold": thi_threshold
+            }
+    # plot_dm_results(**kwargs)
+    plot_corr_results(**kwargs)
+
+## add extreme subjects
 
 
-
-## map of significant correlations between z-scores and THI
