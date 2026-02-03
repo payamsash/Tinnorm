@@ -1,27 +1,27 @@
-from pathlib import Path
-from tqdm import tqdm
-import pickle
+from dataclasses import dataclass
 from datetime import datetime
-import pandas as pd
+from pathlib import Path
+from typing import Optional
+import pickle
+
 import numpy as np
+import pandas as pd
+from tqdm import tqdm
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
 from sklearn.feature_selection import RFE
 from sklearn.model_selection import (
     GroupKFold,
-    StratifiedGroupKFold
-    )
+    StratifiedGroupKFold,
+)
 from sklearn.metrics import (
     balanced_accuracy_score,
+    f1_score,
     precision_score,
     recall_score,
-    f1_score,
-    roc_auc_score
+    roc_auc_score,
 )
-
-from dataclasses import dataclass
-from typing import Optional
 
 @dataclass
 class ClassificationResult:
@@ -154,13 +154,12 @@ def _read_the_file(
     return X, y, sites
 
 
-def _initiate_ml_model(ml_model, n_jobs):
+def _initiate_ml_model(ml_model, n_jobs, random_state):
 
     kwargs = {
         "class_weight": "balanced",
-        "random_state" : 42
+        "random_state" : random_state
     }
-
     if ml_model == "RF":
         model = RandomForestClassifier(
             n_estimators=500,
@@ -191,9 +190,9 @@ def _initiate_rfe_model(base_model, n_features_to_select=None, step=1):
                     )
     return rfe_model
 
-def _run_permutation(X_np, y, sites, model, ml_model, n_permutations, folding_mode):
+def _run_permutation(X_np, y, sites, model, ml_model, n_permutations, folding_mode, random_state):
 
-    y_pred, y_prob = run_cv(X_np, y, sites, model, folding_mode)
+    y_pred, y_prob = run_cv(X_np, y, sites, model, folding_mode, random_state)
     df_metric = metrics_to_dataframe(
         model_name=f"{ml_model}_real",
         y=y,
@@ -201,11 +200,11 @@ def _run_permutation(X_np, y, sites, model, ml_model, n_permutations, folding_mo
         y_prob=y_prob
     )
 
-    rng = np.random.default_rng(42)
+    rng = np.random.default_rng(random_state)
     print("*************** running permutation tests ***************")
     for i in tqdm(range(n_permutations)):
         y_perm = rng.permutation(y)
-        y_pred_p, y_prob_p = run_cv(X_np, y_perm, sites, model, folding_mode)
+        y_pred_p, y_prob_p = run_cv(X_np, y_perm, sites, model, folding_mode, random_state)
         df_p = metrics_to_dataframe(
             model_name=f"{ml_model}_perm_{i+1}",
             y=y_perm,
@@ -242,18 +241,16 @@ def metrics_to_dataframe(model_name, y, y_pred, y_prob=None):
         "roc_auc": [auc]
     })
 
-def run_cv(X, y, sites, model, folding_mode):
+def run_cv(X, y, sites, model, folding_mode, random_state):
 
     if folding_mode == "loso":
         splitter = GroupKFold(n_splits=len(np.unique(sites)))
-
     elif folding_mode == "stratified":
         splitter = StratifiedGroupKFold(
-            n_splits=5,
-            shuffle=True,
-            random_state=42
-        )
-
+                                n_splits=len(np.unique(sites)),
+                                shuffle=True,
+                                random_state=random_state
+                            )
     else:
         raise ValueError("folding_mode must be 'loso' or 'stratified'")
 
@@ -268,7 +265,7 @@ def run_cv(X, y, sites, model, folding_mode):
     return y_pred, y_prob
 
 
-def run_loso_cv_with_folds(X, y, sites, model, folding_mode):
+def run_loso_cv_with_folds(X, y, sites, model, folding_mode, random_state):
         
     if folding_mode == "loso":
         splitter = GroupKFold(n_splits=len(np.unique(sites)))
@@ -277,7 +274,7 @@ def run_loso_cv_with_folds(X, y, sites, model, folding_mode):
         splitter = StratifiedGroupKFold(
             n_splits=5,
             shuffle=True,
-            random_state=42
+            random_state=random_state
         )
     
     fold_probs = []
@@ -397,6 +394,7 @@ def classify(
         apply_rfe=False,
         n_rfe_features=100,
         thi_threshold=None,
+        random_state=42
     ):
 
     params = locals()
@@ -423,7 +421,7 @@ def classify(
         print(f"*********************************************************")
 
     ## initialize
-    model = _initiate_ml_model(ml_model, n_jobs)
+    model = _initiate_ml_model(ml_model, n_jobs, random_state)
     X_1 = X.to_numpy()
     df_metric = pd.DataFrame()
     y_prob = None
@@ -441,21 +439,20 @@ def classify(
     ## permutation test
     if run_permutation:
         df_metric, _, y_prob = _run_permutation(
-                                                    X_1,
-                                                    y,
-                                                    sites,
-                                                    model,
-                                                    ml_model,
-                                                    n_permutations,
-                                                    folding_mode
-                                                    )
-
+                                                X_1,
+                                                y,
+                                                sites,
+                                                model,
+                                                ml_model,
+                                                n_permutations,
+                                                folding_mode,
+                                                random_state
+                                                )
     # compare features
     y_prob_1 = y_prob_2 = delta_null = real_delta = p_value = None
     y1_folds = p1_folds = y2_folds = p2_folds = None
 
     if run_comparison:
-        
         X_2, y_2, sites_2 = _read_the_file(
                                             tinnorm_dir,
                                             "deviation",
@@ -473,8 +470,8 @@ def classify(
                 _run_comparison(X_1, X_2, y, y_2, sites, sites_2, model, n_permutations, folding_mode)
         
         ## get CI for the ROC curve by running LOSO with folds
-        y1_folds, p1_folds = run_loso_cv_with_folds(X_1, y, sites, model, folding_mode)
-        y2_folds, p2_folds = run_loso_cv_with_folds(X_2, y, sites, model, folding_mode)
+        y1_folds, p1_folds = run_loso_cv_with_folds(X_1, y, sites, model, folding_mode, random_state)
+        y2_folds, p2_folds = run_loso_cv_with_folds(X_2, y, sites, model, folding_mode, random_state)
 
     # add context columns to metrics
     if not df_metric.empty:
@@ -494,7 +491,6 @@ def classify(
     
     if run_comparison: 
         df_metric.at[1, "data_mode"] = "deviation"
-        
         return ClassificationResult(
                                     df_metric=df_metric,
                                     y=y,
@@ -509,8 +505,6 @@ def classify(
                                     p2_folds=p2_folds,
                                 )
     
-
-
 if __name__ == "__main__":
     
     tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
@@ -528,11 +522,12 @@ if __name__ == "__main__":
                     ml_model = "RF",
                     n_jobs=-1,
                     run_permutation = True,
-                    n_permutations = 2,
+                    n_permutations = 6,
                     run_comparison = False,
-                    apply_rfe = True,
+                    apply_rfe = False,
                     n_rfe_features = 100,
-                    thi_threshold = None
+                    thi_threshold = None,
+                    random_state = 42
                     )
     
     ## some checks
@@ -549,10 +544,10 @@ if __name__ == "__main__":
     if mode not in valid_modes:
         if conn_mode is not None:
             raise ValueError(f"conn_mode must be None when mode='{mode}', got {conn_mode} instead.")
-
+        
     if mode == "aperiodic" and freq_band is not None:
         raise ValueError(f"freq_band must be None when mode='aperiodic', got {freq_band} instead.")
-
+    
     if run_permutation == run_comparison:
         raise ValueError("Exactly one of run_permutation or run_comparison must be True.")
     
@@ -565,7 +560,6 @@ if __name__ == "__main__":
         raise ValueError(
                 f"conn_mode must not be None, when mode is diffusive."
                 )
-
     
     if apply_rfe and run_permutation:
         if n_permutations > 5:
@@ -590,5 +584,4 @@ if __name__ == "__main__":
     save_clf_result(res, clfs_dir, run_mode)
 
 
-
-    ## add diffusive option
+    ## add running scenarios with loop
