@@ -19,6 +19,9 @@ The resulting BIDS dataset enables consistent and reproducible downstream
 EEG analysis across cohorts.
 """
 
+def extract_tide_subjects():
+    pass
+
 def convert_to_bids():
     root_dir = Path("/Volumes/Extreme_SSD/payam_data/Tide_rest_data")
     bids_dir = root_dir / "BIDS"

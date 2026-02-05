@@ -136,18 +136,34 @@ for text in g._legend.texts:
 
 ## ROC curves
 colors = ["red", "green"]
-fig, ax = plt.subplots(1, 1, figsize=(5, 5))
-ax.plot([0, 1], [0, 1], linestyle="--", color="gray", label="Chance (AUC = 0.50)")
+fig, axs = plt.subplots(1, 2, figsize=(10, 4))
+axs[0].plot([0, 1], [0, 1], linestyle="--", color="gray", label="Chance (AUC = 0.50)")
 for y, y_prob, color in zip(ys, y_probs, colors):
     RocCurveDisplay.from_predictions(
                                     y_true=y,
                                     y_score=y_prob,
                                     plot_chance_level=False,
                                     despine=True,
-                                    ax=ax,
+                                    ax=axs[0],
                                     curve_kwargs=dict(color=color),
                                     )
-ax.legend(frameon=False, loc="lower right")
+axs[0].legend(frameon=False, loc="lower right")
+
+## Precision / Recall curves
+axs[1].hlines(0.5, 0, 1, linestyle="--", color="gray", label="Chance (AUC = 0.50)")
+for y, y_prob, color in zip(ys, y_probs, colors):
+    kwargs={"color": color}
+    PrecisionRecallDisplay.from_predictions(
+                                    y_true=y,
+                                    y_score=y_prob,
+                                    plot_chance_level=False,
+                                    despine=True,
+                                    ax=axs[1],
+                                    **kwargs,
+                                    )
+axs[1].legend(frameon=False, loc="lower right")
+
+## maybe add f lines : https://scikit-learn.org/stable/auto_examples/model_selection/plot_precision_recall.html
 
 
 ######################## still need this part

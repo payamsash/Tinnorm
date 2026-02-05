@@ -31,10 +31,14 @@ def run_nm(
     df.drop(columns=["Unnamed: 0"], inplace=True, errors="ignore")
 
     ## creating a NormData objects
+    demographic_cols = ["subject_id", "SITE", "group", "age", "sex", "PTA4_mean"]
+    response_cols = df.columns.difference(demographic_cols).tolist()
+    # response_cols = [c for c in response_cols if c.endswith(f"alpha_1")]
+
     kwargs = {
-                "covariates": ["age", "sex", "PTA4_mean"],
+                "covariates": demographic_cols[-3:],
                 "batch_effects": ["SITE"],
-                "response_vars": [c for c in df.columns[:-6] if c.endswith(f"alpha_1")], # list(df.columns[:-6])
+                "response_vars": response_cols, 
                 "subject_ids": "subject_id"
                 }
 
@@ -104,7 +108,7 @@ if __name__ == "__main__":
     
     preproc_levels = [2]
     spaces = ["sensor", "source"][1:]
-    modalities = ["aperiodic", "conn", "power", "global", "regional"][2:3]
+    modalities = ["aperiodic", "conn", "power", "global", "regional"][-2:]
     conn_modes = ["pli", "plv", "coh"][2:]
 
     for preproc_level in preproc_levels:
@@ -113,12 +117,12 @@ if __name__ == "__main__":
                 for conn_mode in conn_modes:
                     
                     if modality in ["conn", "global", "regional"]:
-                        fname_feature = hm_dir / f"{modality}_{space}_preproc_{preproc_level}_{conn_mode}_hm.csv"
-                        model_dir = models_dir / f"{modality}_{space}_preproc_{preproc_level}_{conn_mode}"
+                        fname_feature = hm_dir / f"preproc_{preproc_level}" / space / f"{modality}_{conn_mode}_hm.csv"
+                        model_dir = models_dir / f"preproc_{preproc_level}" / space / f"{modality}_{conn_mode}"
 
                     if modality in ["aperiodic", "power"]:
-                        fname_feature = hm_dir / f"{modality}_{space}_preproc_{preproc_level}_hm.csv"
-                        model_dir = models_dir / f"{modality}_{space}_preproc_{preproc_level}"
+                        fname_feature = hm_dir / f"preproc_{preproc_level}" / space / f"{modality}_hm.csv"
+                        model_dir = models_dir / f"preproc_{preproc_level}" / space / f"{modality}"
 
                     if fname_feature.is_file() and not model_dir.is_dir():
                         run_nm(

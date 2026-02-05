@@ -81,7 +81,7 @@ for sub_id in tqdm(subjects_dict.keys()):
         # Case 3: process and save
         raw = mne.io.read_raw_brainvision(input_fname, preload=False)
 
-        if raw.info["sfreq"] != sfreq:
+        if raw.info["sfreq"] != sfreq: # and raw.info["sfreq"] != 50000 for cwax
             print(f"{sub_id} | {par}: resampling {raw.info['sfreq']} → {sfreq}")
             raw.load_data()
             raw.resample(sfreq)
