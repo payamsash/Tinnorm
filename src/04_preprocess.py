@@ -122,6 +122,8 @@ def preprocess(subject_id, bids_root):
 
         if subject_id in ["70053", "70054", "70055"]:
             eo_event_id = 'Stimulus/S  2'
+        elif subject_id in ["70085", "70086"]:
+            eo_event_id = 'Stimulus/S  4'
         else:
             eo_event_id = 'Stimulus/S  5'
             
