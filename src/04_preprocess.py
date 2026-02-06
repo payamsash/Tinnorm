@@ -120,7 +120,11 @@ def preprocess(subject_id, bids_root):
         # else:
         #     eo_event_id = 'Stimulus/S  5'
 
-        eo_event_id = 'Stimulus/S  5'
+        if subject_id in ["70053", "70054", "70055"]:
+            eo_event_id = 'Stimulus/S  2'
+        else:
+            eo_event_id = 'Stimulus/S  5'
+            
         events, event_ids = events_from_annotations(raw)
         event_key = event_ids[eo_event_id]
         events_eo = events[events[:, 2] == event_key]
@@ -130,12 +134,15 @@ def preprocess(subject_id, bids_root):
             mean_diff = int(np.round(np.mean(diffs)))
             new_row = np.array([[events_eo[-1, 0] + mean_diff, 0, 5]])
             events_eo = np.vstack([events_eo, new_row])
-
-        if len(events_eo) != 5 and subject_id != "70050":
+        
+        if len(events_eo) != 5 and not subject_id in ["70049", "70050"]:
             raise ValueError(f"number close eye events should be 5, got {len(events_eo)} instead.") 
 
         onsets = (events_eo[:, 0] + zurich_cutoff * raw.info["sfreq"]) / raw.info["sfreq"]
-        duration = (60 - 2 * zurich_cutoff) * np.ones(shape=len(onsets))
+        if subject_id == "70049": # short recording
+            duration = (58 - 2 * zurich_cutoff) * np.ones(shape=len(onsets))
+        else:
+            duration = (60 - 2 * zurich_cutoff) * np.ones(shape=len(onsets))
         annots = Annotations(onsets, duration, description="eo")
         raw.set_annotations(annots)
         raw = concatenate_raws(raw.crop_by_annotations())
