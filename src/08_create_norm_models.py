@@ -13,6 +13,7 @@ from pcntoolkit import (
 def run_nm(
             fname_feature,
             model_dir,
+            outscaler="none",
             random_state=42
         ):
 
@@ -91,7 +92,7 @@ def run_nm(
             saveplots=False,
             save_dir=str(cfg["save_dir"]),
             inscaler="standardize",
-            outscaler="none",
+            outscaler=outscaler,
         )
         model.fit_predict(cfg["train"], cfg["test"])
 
@@ -128,5 +129,28 @@ if __name__ == "__main__":
                         run_nm(
                                 fname_feature,
                                 model_dir,
+                                outscaler="none",
                                 random_state=42
                                 )
+                        
+    ## only for centile plotting I set outscaler to standardize:
+    preproc_level = 2
+    space = "source"
+    conn_mode = "coh"
+
+    for modality in modalities:
+        if modality in ["conn", "global", "regional"]:
+            fname_feature = hm_dir / f"preproc_{preproc_level}" / space / f"{modality}_{conn_mode}_hm.csv"
+            model_dir = models_dir / f"preproc_{preproc_level}" / space / f"{modality}_{conn_mode}_centile_plot"
+
+        if modality in ["aperiodic", "power"]:
+            fname_feature = hm_dir / f"preproc_{preproc_level}" / space / f"{modality}_hm.csv"
+            model_dir = models_dir / f"preproc_{preproc_level}" / space / f"{modality}_centile_plot"
+
+        if fname_feature.is_file() and not model_dir.is_dir():
+            run_nm(
+                    fname_feature,
+                    model_dir,
+                    outscaler="standardize",
+                    random_state=42
+                    )
