@@ -97,9 +97,9 @@ for site in site_map.values():
     print(f"********* {site_code} *********")
     if len(missing_in_a) or len(missing_in_q):
         print(f"In df_q but NOT in df_a: {missing_in_a.unique()}")
-        print(f"In df_a but NOT in df_q: {missing_in_q.unique()}")
+        print(f"In df_a but NOT in df_q: {missing_in_q.unique()} \n")
     else:
-        print("All is good here!")
+        print("All is good here!\n")
 
     df = df_q.merge(
                     df_a,
