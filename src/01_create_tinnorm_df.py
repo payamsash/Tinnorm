@@ -1,12 +1,7 @@
-
-
-############################################## the old one
 from pathlib import Path
 from warnings import warn
 import numpy as np
 import pandas as pd
-
-## add documentation
 
 behavioural_dir = Path.cwd().parent / "material" 
 site_map = {
@@ -23,16 +18,16 @@ quest_cols = [ # maybe add hearing loss
             "study_id",
             "intro_gender",
             "esit_a1", # age
-            "hq_score",
-            "hq_attentional_score",
-            "hq_social_score",
-            "hq_emotional_score",
-            "hads_d_score",
-            "hads_a_score",
+            # "hq_score",
+            # "hq_attentional_score",
+            # "hq_social_score",
+            # "hq_emotional_score",
+            # "hads_d_score",
+            # "hads_a_score",
             "esit_a17", # group
-            "tfi_score",
-            "thi_score",
-            "psq_score" # stress level
+            # "tfi_score",
+            # "thi_score",
+            # "psq_score" # stress level
             ]
 
 audio_cols = [
@@ -50,22 +45,19 @@ audio_cols = [
         ]
 avg_pairs = {
             "PTA4_mean": ["PTA4_ARE", "PTA4_ALE"],
-            "PTA_HF_mean": ["PTA_HF_ARE", "PTA_HF_ALE"],
-            "PTA_TIDE_mean": ["PTA_TIDE_ARE", "PTA_TIDE_ALE"]
+            # "PTA_HF_mean": ["PTA_HF_ARE", "PTA_HF_ALE"],
+            # "PTA_TIDE_mean": ["PTA_TIDE_ARE", "PTA_TIDE_ALE"]
             }
+
+## add documentation
 
 tinnitus_thr = 4
 dfs = []
 for site in site_map.values():
 
     site_code = site.upper()[:3]
-
-    if site_code == "ZUE":
-        print(f"{site} not ready yet ...")
-        continue
-
     quest_fname = behavioural_dir / "questionnaires" / f"Questionnaire_data_TIDE_{site_code}.csv"
-    audio_fname = behavioural_dir / "audiograms" / f"Audiometry_data_TIDE_{site_code}.csv"
+    audio_fname = behavioural_dir / "audiograms" / f"Audiometry_data_TIDE_{site_code}.xlsx"
     
     if not quest_fname.is_file() or not audio_fname.is_file():
         warn(f"Missing data for site '{site}': "
@@ -74,25 +66,11 @@ for site in site_map.values():
         continue
     kwargs = dict(sep=None, engine="python", index_col=None, encoding="utf-8-sig")
     df_q = pd.read_csv(quest_fname, **kwargs)
-    df_a = pd.read_csv(audio_fname, **kwargs)
+    df_a = pd.read_excel(audio_fname)
 
-    df_q["site"] = site
-
-    # some site spcific fixes
+    ## small issue fix
     if site_code == "ILL":
-        df_q.rename(columns={"Subject ID": "study_id",
-                            "esit_a2": "intro_gender"}, inplace=True)
-    
-        df_a.rename(columns={"RE_TinFreq(k)": "RE_TinFreq",
-                            "LE_TinFreq(k)": "LE_TinFreq",
-                            "RE_TinLoudness(dBSL)": "RE_TinLoudness"},
-                            inplace=True) # must not be converted but diff scales but both are dBSL
         df_a[["RE_TinFreq", "LE_TinFreq"]] = df_a[["RE_TinFreq", "LE_TinFreq"]] * 1000
-        
-    if site_code == "REG":
-        df_a.rename(columns={"PT4_HF_ARE": "PTA_HF_ARE",
-                            "PT4_TIDE_ARE": "PTA_TIDE_ARE"},
-                            inplace=True)
 
     missing_quest_cols = set(quest_cols) - set(df_q.columns)
     if missing_quest_cols:
@@ -103,30 +81,41 @@ for site in site_map.values():
     if missing_audio_cols:
         warn(f"Site '{site}': audiometry is missing columns {sorted(missing_audio_cols)}. Skipping this site.")
         continue
-
+    
     df_a = df_a[audio_cols]
+    df_q = df_q[quest_cols]
     df_a.rename(columns={"Subject ID": "study_id"}, inplace=True)
     df_q["study_id"] = df_q["study_id"].astype(str)
     df_a["study_id"] = df_a["study_id"].astype(str)
-
-    if site_code == "GHE":
-        df_a["study_id"] = (
-                            pd.to_numeric(df_a["study_id"], errors="coerce")
-                            .astype("Int64")
-                            .astype(str)
-                        )
 
     for new_col, cols in avg_pairs.items():
         df_a[new_col] = df_a[cols].mean(axis=1)
     df_a.drop(columns=[col for cols in avg_pairs.values() for col in cols], inplace=True)
 
+    missing_in_q = df_a.loc[~df_a["study_id"].isin(df_q["study_id"]), "study_id"]
+    missing_in_a = df_q.loc[~df_q["study_id"].isin(df_a["study_id"]), "study_id"]
+    print(f"********* {site_code} *********")
+    if len(missing_in_a) or len(missing_in_q):
+        print(f"In df_q but NOT in df_a: {missing_in_a.unique()}")
+        print(f"In df_a but NOT in df_q: {missing_in_q.unique()}")
+    else:
+        print("All is good here!")
+
     df = df_q.merge(
                     df_a,
                     on="study_id",
-                    how="left",
+                    how="inner",
                 )
-
+    df["site"] = site
+    
     dfs.append(df[["site"] + quest_cols + list(avg_pairs.keys())])
+
+    
+
+    ## check if sex is coreect
+    ## check if age is in order
+
+    ## check if group is okay
 
 df_all = pd.concat(dfs, ignore_index=True)
 mapping = {
@@ -137,14 +126,13 @@ mapping = {
             } 
 df_all.rename(columns=mapping, inplace=True)
 
+## add more here
 cols_required = [
-                "age",
                 "sex",
-                "site",
-                "hq_score",
-                "group",
+                "age",
                 "PTA4_mean",
-                "PTA_TIDE_mean"
+                "site",
+                "group"
             ]
 
 df_all.dropna(subset=cols_required, inplace=True)
