@@ -4,7 +4,7 @@ from mne_bids import BIDSPath, write_raw_bids
 from tqdm.contrib import tzip
 from tqdm import tqdm
 from mne import set_log_level
-#set_log_level("Error")
+set_log_level("Error")
 
 """
 Convert multi-site EEG datasets to BIDS format.
@@ -93,9 +93,6 @@ def convert_to_bids():
                                         total=len(subject_ids),
                                         desc=f"Converting {site}"):
             print(subject_id)
-            if subject_id not in ["70086"]:
-                continue
-
             raw = read_raw(fname)
             if raw.info["sfreq"] != 1000.0:
                 raw.resample(1000)
