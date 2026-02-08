@@ -45,7 +45,7 @@ print("*************************************************\n")
 
 ## plotting part
 common_ids = ids_list & ids_df
-df_plot = df_plot[df_plot["subject_id"].astype(str).isin(common_ids)]
+df_plot = df_plot[df_plot["subject_id"].astype(str).isin(ids_df)]
 site_names = df_plot["site"].unique()
 print(site_names)
 pal = [

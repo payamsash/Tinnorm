@@ -131,7 +131,9 @@ df_all.dropna(subset=cols_required, inplace=True)
 df_all["group"] = np.where(df_all["group"] <= tinnitus_thr, 1, 0)
 df_all.sort_values(by=["site", "subject_id"], inplace=True)
 
-## 2 more checks
+## more checks
+df_all = df_all[~df_all['subject_id'].isin(["70072", "70079"])] # high HADS
+
 print(f"********** sex not 1 or 2 ***********")
 for _, row in df_all.loc[~df_all['sex'].isin([1, 2])].iterrows():
     print(f"subject_id {row['subject_id']} from site {row['site']} has sex {row['sex']}")
