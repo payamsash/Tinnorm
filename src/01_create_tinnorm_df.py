@@ -97,7 +97,7 @@ for site in site_map.values():
     print(f"********* {site_code} *********")
     if len(missing_in_a) or len(missing_in_q):
         print(f"In df_q but NOT in df_a: {missing_in_a.unique()}")
-        print(f"In df_a but NOT in df_q: {missing_in_q.unique()} \n")
+        print(f"In df_a but NOT in df_q: {missing_in_q.unique()}\n")
     else:
         print("All is good here!\n")
 
@@ -106,16 +106,8 @@ for site in site_map.values():
                     on="study_id",
                     how="inner",
                 )
-    df["site"] = site
-    
+    df["site"] = site    
     dfs.append(df[["site"] + quest_cols + list(avg_pairs.keys())])
-
-    
-
-    ## check if sex is coreect
-    ## check if age is in order
-
-    ## check if group is okay
 
 df_all = pd.concat(dfs, ignore_index=True)
 mapping = {
@@ -138,4 +130,17 @@ cols_required = [
 df_all.dropna(subset=cols_required, inplace=True)
 df_all["group"] = np.where(df_all["group"] <= tinnitus_thr, 1, 0)
 df_all.sort_values(by=["site", "subject_id"], inplace=True)
+
+## 2 more checks
+print(f"********** sex not 1 or 2 ***********")
+for _, row in df_all.loc[~df_all['sex'].isin([1, 2])].iterrows():
+    print(f"subject_id {row['subject_id']} from site {row['site']} has sex {row['sex']}")
+
+print(f"********** group not 0 or 1 ***********")
+for _, row in df_all.loc[~df_all['group'].isin([0, 1])].iterrows():
+    print(f"subject_id {row['subject_id']} from site {row['site']} has group {row['group']}")
+
+df_all = df_all[df_all['sex'].isin([1, 2])]
+df_all = df_all[df_all['group'].isin([0, 1])]
+
 df_all.to_csv("../material/master.csv", index=False)
