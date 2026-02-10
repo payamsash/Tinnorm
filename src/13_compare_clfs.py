@@ -303,8 +303,8 @@ def _run_comparison(X_1, X_2, y, y_2, sites, sites_2, model, n_permutations, fol
     print("y and sites match across residual and deviation data.")
 
     # Run LOSO-CV for both feature sets 
-    y_pred_1, y_prob_1 = run_cv(X_1, y, sites, model, folding_mode)
-    y_pred_2, y_prob_2 = run_cv(X_2, y, sites, model, folding_mode)
+    y_pred_1, y_prob_1 = run_cv(X_1, y, sites, model, folding_mode, random_state=42)
+    y_pred_2, y_prob_2 = run_cv(X_2, y, sites, model, folding_mode, random_state=42)
 
     # Metrics tables
     df_X1 = metrics_to_dataframe("X1", y, y_pred_1, y_prob_1)
@@ -431,7 +431,7 @@ def classify(
         n_select = min(n_rfe_features, X_1.shape[1] // 2)
         print(f"Applying RFE: selecting top {n_select} features")
         if mode == "conn":
-            step = 200
+            step = 500
         else:
             step = 20
         model = _initiate_rfe_model(model, n_features_to_select=n_select, step=step)
@@ -521,9 +521,9 @@ if __name__ == "__main__":
                     corr_thr = 0.95,
                     ml_model = "RF",
                     n_jobs=-1,
-                    run_permutation = True,
-                    n_permutations = 6,
-                    run_comparison = False,
+                    run_permutation = False,
+                    n_permutations = 100,
+                    run_comparison = True,
                     apply_rfe = False,
                     n_rfe_features = 100,
                     thi_threshold = None,

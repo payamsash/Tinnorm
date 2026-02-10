@@ -119,7 +119,7 @@ if __name__ == "__main__":
     tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
     hm_dir = tinnorm_dir / "harmonized"
     
-    preproc_levels = [2]
+    preproc_levels = [1, 2, 3]
     spaces = ["sensor", "source"][1:]
     conn_modes = ["pli", "plv", "coh"][2:]
     hm_modes = ["hm", "residual"]

@@ -106,7 +106,6 @@ def harmonize(
             df_merged.to_csv(fname_save, index=False)
 
     else:
-        
         data_full = df_merged.iloc[:, :-len(cols)].to_numpy()
         df_cov_full = df_merged[["SITE", "age",	"sex", "PTA4_mean"]]
 
@@ -118,12 +117,11 @@ def harmonize(
                                             seed=0,
                                             return_s_data=True
                                             )
-
+        
         ## learn the model on controls
         df_train = df_merged.query('group == 0')
         data_controls = df_train.iloc[:, :-len(cols)].to_numpy()
         df_cov_controls = df_train[["SITE",	"age", "sex", "PTA4_mean"]]
-        
         hm_model, _ = harmonizationLearn(
                                             data_controls,
                                             df_cov_controls,
@@ -149,7 +147,6 @@ def harmonize(
                                 df_merged[df_merged.columns[-len(cols):]].reset_index(drop=True)],
                                 axis=1
                                 )
-            
             if modality == "conn":
                 fname_save = saving_dir / f"preproc_{preproc_level}" / space / f"{modality}_{conn_mode}_{title}.csv"
             else:
@@ -164,9 +161,9 @@ if __name__ == "__main__":
     hm_dir = tinnorm_dir / "harmonized"
     os.makedirs(hm_dir, exist_ok=True)
     
-    preproc_levels = [2]
+    preproc_levels = [1, 2, 3]
     spaces = ["sensor", "source"][1:]
-    modalities = ["power", "conn", "aperiodic"][2:]
+    modalities = ["power", "conn", "aperiodic"]
     conn_modes = ["pli", "plv", "coh"][2:]
 
     for preproc_level in preproc_levels:

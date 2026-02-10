@@ -257,7 +257,7 @@ def plot_brain_connectome(
                 edge_weights=df.mean().values,
                 network_order=network_order,
                 network_colors=network_color,
-                linewidths=2,
+                linewidths=4,
                 cmap=ListedColormap(palette),
                 black_BG=True,
                 label_fontsize=18,
@@ -394,11 +394,11 @@ if __name__ == "__main__":
         
         ## find and read the deviation file
         space = "source"
-        mode = "power"
+        mode = "conn"
         preproc_level = 2
         data_mode = "test"
-        freq_band = "alpha_1"
-        conn_mode = None #"pli" # "pli"
+        freq_band = "alpha_2"
+        conn_mode = "coh"
         thr = 1.96
 
         pal_1 = color_palette("Purples", n_colors=200)

@@ -6,6 +6,7 @@ import numpy as np
 from mne.viz import Brain
 from mne import read_labels_from_annot
 from matplotlib.colors import ListedColormap
+from matplotlib.colors import LinearSegmentedColormap
 
 
 
@@ -34,7 +35,7 @@ def plot_dist(ev_fname):
 
         def label(x, color, label):
                 ax = plt.gca()
-                ax.text(0.8, .1, f"metric = {label}", fontstyle='italic', color=color,
+                ax.text(0.95, .1, f"metric = {label}", fontstyle='italic', color=color,
                         ha="left", va="center", transform=ax.transAxes)
 
         g = sns.FacetGrid(
@@ -225,9 +226,9 @@ if __name__ == "__main__":
         space = "source"
         preproc_level = 2
         data_mode = "test"
-        freq_band = "alpha_1"
-        metric = "MSLL"
-
+        freq_band = "alpha_2"
+        metric = "EXPV"
+        
         tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
         models_dir = tinnorm_dir / "models"
         model_dir = models_dir / f"preproc_{preproc_level}" / space / f"{mode}" / "for_eval"

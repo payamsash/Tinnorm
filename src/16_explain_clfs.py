@@ -175,8 +175,6 @@ y_test  = y[test_idx]
 sites_train = sites[train_idx]
 sites_test  = sites[test_idx]
 
-
-
 ## train clf
 kwargs = {
         "class_weight": "balanced",
@@ -224,12 +222,10 @@ PrecisionRecallDisplay.from_predictions(
 )
 
 for ax in [ax_roc, ax_pr]:
-    # Applying your preferred title style
     ax.set_title(ax.get_title(), style='italic', fontsize='small')
     ax.legend(frameon=False, loc="lower right", fontsize='small')
 
 plt.show()
-
 
 ## run shap and clustering
 df["group"] = df["group"].map({0: "Control", 1: "Tinnitus"})
@@ -268,7 +264,8 @@ for i, ax, f_idx, col_name in zip(range(k), axs, f_idxs, col_names):
     shap.plots.scatter(
             shap_values[:, f_idx, shap_idx],
             color=y_train,
-            dot_size=25,
+            dot_size=15,
+            hist=False,
             alpha=1,
             cmap=cmap2,
             ax=ax,
@@ -280,7 +277,12 @@ for i, ax, f_idx, col_name in zip(range(k), axs, f_idxs, col_names):
                 coll.colorbar.remove()
     if i == 0:
         ax.set_ylabel("Shap values", fontsize=11)
+        ax.set_xlim([0, 9])
     else:
         ax.set_ylabel("")
     ax.set_xlabel("Feature value", style='italic', fontsize=11)
     ax.set_title(col_name, style='italic', fontsize=11)
+    if i == 2:
+        ax.set_xlim([0, 20])
+
+plt.show()

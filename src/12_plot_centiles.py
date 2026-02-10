@@ -20,7 +20,7 @@ def run_centile_plot(
     tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
     hm_dir = tinnorm_dir / "harmonized"
     models_dir = tinnorm_dir / "models"
-    model_dir = models_dir / f"preproc_{preproc_level}" / space / mode / "full_model"
+    model_dir = models_dir / f"preproc_{preproc_level}" / space / f"{mode}_centile_plot" / "full_model"
     fname_feature = hm_dir / f"preproc_{preproc_level}" / space / f"{mode}_hm.csv"
 
     ## load model and re-create norm data 
@@ -100,14 +100,14 @@ def run_centile_plot(
 
 if __name__ == "__main__":
 
-    mode = "aperiodic"
+    mode = "power"
     space = "source"
     preproc_level = 2
     covar = "age" # "PTA4_mean"
 
     data_mode = "train"
-    brain_labels = ["transversetemporal-lh", "transversetemporal-rh"]
-    frequency = "alpha_1"
+    brain_labels = ["transversetemporal-rh"]
+    frequency = "alpha_2"
 
     run_centile_plot(
                     brain_labels,
@@ -118,3 +118,5 @@ if __name__ == "__main__":
                     space,
                     preproc_level
                     )
+    
+    ## fix conn_mode option + frequency filter

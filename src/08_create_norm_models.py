@@ -107,9 +107,9 @@ if __name__ == "__main__":
     models_dir = tinnorm_dir / "models"
     os.makedirs(models_dir, exist_ok=True)
     
-    preproc_levels = [2]
+    preproc_levels = [1, 2, 3]
     spaces = ["sensor", "source"][1:]
-    modalities = ["aperiodic", "conn", "power", "global", "regional"][-2:]
+    modalities = ["aperiodic", "conn", "power", "global", "regional"]
     conn_modes = ["pli", "plv", "coh"][2:]
 
     for preproc_level in preproc_levels:

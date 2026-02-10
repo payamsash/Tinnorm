@@ -81,11 +81,11 @@ def compute_diffusion_scores(
 if __name__ == "__main__":
 
     space = "source"
-    preproc_level = 2
+    preproc_levels = [1, 2, 3]
     conn_mode = "coh"
-
-    compute_diffusion_scores(
-                            space,
-                            preproc_level,
-                            conn_mode
-                            )
+    for preproc_level in preproc_levels:
+        compute_diffusion_scores(
+                                space,
+                                preproc_level,
+                                conn_mode
+                                )
