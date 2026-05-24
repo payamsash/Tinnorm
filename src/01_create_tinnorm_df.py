@@ -1,148 +1,173 @@
+"""
+Build master_new.csv from the two aggregate TIDE files.
+
+Sources
+-------
+  material/Aggregated_Questionnaire_TIDE_Final_260326.xlsx
+      sheet: Questionnaire_data_TIDE_ALL
+      → demographics, group label, THI score
+
+  material/TIDE-Compiled-Version2_3-26-2026.xlsx
+      sheet: Sheet1
+      → audiometry (PTA4, PTA_HF per ear)
+
+Output
+------
+  material/master_new.csv
+      subject_id, site, group (0=control, 1=tinnitus),
+      age, sex (1=male, 2=female),
+      PTA4_mean, PTA4_HF, THI
+
+Run from src/:  python 01_create_tinnorm_df.py
+"""
+
 from pathlib import Path
 from warnings import warn
+
 import numpy as np
 import pandas as pd
 
-behavioural_dir = Path.cwd().parent / "material" 
-site_map = {
-        "1": "austin",
-        "2": "dublin",
-        "3": "ghent",
-        "4": "illinois",
-        "5": "regensburg",
-        "6": "tuebingen",
-        "7": "zuerich"
-        }
+# ── Paths ─────────────────────────────────────────────────────────────────────
 
-quest_cols = [ # maybe add hearing loss
-            "study_id",
-            "intro_gender",
-            "esit_a1", # age
-            # "hq_score",
-            # "hq_attentional_score",
-            # "hq_social_score",
-            # "hq_emotional_score",
-            # "hads_d_score",
-            # "hads_a_score",
-            "esit_a17", # group
-            # "tfi_score",
-            # "thi_score",
-            # "psq_score" # stress level
-            ]
+MATERIAL_DIR = Path(__file__).resolve().parent.parent / "material"
+QUEST_FILE   = MATERIAL_DIR / "Aggregated_Questionnaire_TIDE_Final_260326.xlsx"
+AUDIO_FILE   = MATERIAL_DIR / "TIDE-Compiled-Version2_3-26-2026.xlsx"
+OUT_FILE     = MATERIAL_DIR / "master_new.csv"
 
-audio_cols = [
-            "Subject ID",
-            "PTA4_ARE",
-            "PTA4_ALE",
-            "PTA_TIDE_ARE",
-            "PTA_TIDE_ALE",
-            "PTA_HF_ARE",
-            "PTA_HF_ALE",
-            # "RE_TinFreq", # for now remove them
-            # "RE_TinLoudness",
-            # "LE_TinFreq",
-            # "LE_TinLoudness"
-        ]
-avg_pairs = {
-            "PTA4_mean": ["PTA4_ARE", "PTA4_ALE"],
-            # "PTA_HF_mean": ["PTA_HF_ARE", "PTA_HF_ALE"],
-            # "PTA_TIDE_mean": ["PTA_TIDE_ARE", "PTA_TIDE_ALE"]
-            }
+# Questionnaire site abbreviation → canonical lowercase name
+SITE_MAP_QUEST = {
+    "Aus": "austin",
+    "Dub": "dublin",
+    "Ghe": "ghent",
+    "UIL": "illinois",
+    "Rgb": "regensburg",
+    "UKT": "tuebingen",
+    "ZUR": "zuerich",
+}
 
-## add documentation
+# Subjects excluded for clinical reasons (high HADS scores)
+EXCLUDE_IDS = {"70072", "70079"}
 
-tinnitus_thr = 4
-dfs = []
-for site in site_map.values():
+# ── Load questionnaire ────────────────────────────────────────────────────────
 
-    site_code = site.upper()[:3]
-    quest_fname = behavioural_dir / "questionnaires" / f"Questionnaire_data_TIDE_{site_code}.csv"
-    audio_fname = behavioural_dir / "audiograms" / f"Audiometry_data_TIDE_{site_code}.xlsx"
-    
-    if not quest_fname.is_file() or not audio_fname.is_file():
-        warn(f"Missing data for site '{site}': "
-            f"{'questionnaire' if not quest_fname.is_file() else ''} "
-            f"{'audiometry' if not audio_fname.is_file() else ''}. Skipping this site.")
-        continue
-    kwargs = dict(sep=None, engine="python", index_col=None, encoding="utf-8-sig")
-    df_q = pd.read_csv(quest_fname, **kwargs)
-    df_a = pd.read_excel(audio_fname)
+print("Loading questionnaire …")
+df_q = pd.read_excel(QUEST_FILE, sheet_name="Questionnaire_data_TIDE_ALL")
+print(f"  {len(df_q)} rows, {df_q.shape[1]} columns")
 
-    ## small issue fix
-    if site_code == "ILL":
-        df_a[["RE_TinFreq", "LE_TinFreq"]] = df_a[["RE_TinFreq", "LE_TinFreq"]] * 1000
+quest_keep = {
+    "study_id":    "subject_id",
+    "Site":        "site",
+    "Group":       "group",
+    "intro_gender": "sex",
+    "esit_a1":     "age",
+    "THI_SCORE":   "THI",
+    "TFI_SCORE":   "TFI",
+}
+missing_q = [c for c in quest_keep if c not in df_q.columns]
+if missing_q:
+    raise ValueError(f"Questionnaire is missing columns: {missing_q}")
 
-    missing_quest_cols = set(quest_cols) - set(df_q.columns)
-    if missing_quest_cols:
-        warn(f"Site '{site}': questionnaire is missing columns {sorted(missing_quest_cols)}. Skipping this site.")
-        continue
+df_q = df_q[list(quest_keep)].copy()
+df_q.rename(columns=quest_keep, inplace=True)
+df_q["subject_id"] = df_q["subject_id"].astype(str)
+df_q["site"]       = df_q["site"].map(SITE_MAP_QUEST)
 
-    missing_audio_cols = set(audio_cols) - set(df_a.columns)
-    if missing_audio_cols:
-        warn(f"Site '{site}': audiometry is missing columns {sorted(missing_audio_cols)}. Skipping this site.")
-        continue
-    
-    df_a = df_a[audio_cols]
-    df_q = df_q[quest_cols]
-    df_a.rename(columns={"Subject ID": "study_id"}, inplace=True)
-    df_q["study_id"] = df_q["study_id"].astype(str)
-    df_a["study_id"] = df_a["study_id"].astype(str)
+missing_site = df_q["site"].isna().sum()
+if missing_site:
+    warn(f"{missing_site} questionnaire rows have an unrecognised site code — they will be dropped.")
+df_q.dropna(subset=["site"], inplace=True)
 
-    for new_col, cols in avg_pairs.items():
-        df_a[new_col] = df_a[cols].mean(axis=1)
-    df_a.drop(columns=[col for cols in avg_pairs.values() for col in cols], inplace=True)
+# Group: 'T' → 1 (tinnitus), 'C' → 0 (control)
+df_q["group"] = df_q["group"].map({"T": 1, "C": 0})
 
-    missing_in_q = df_a.loc[~df_a["study_id"].isin(df_q["study_id"]), "study_id"]
-    missing_in_a = df_q.loc[~df_q["study_id"].isin(df_a["study_id"]), "study_id"]
-    print(f"********* {site_code} *********")
-    if len(missing_in_a) or len(missing_in_q):
-        print(f"In df_q but NOT in df_a: {missing_in_a.unique()}")
-        print(f"In df_a but NOT in df_q: {missing_in_q.unique()}\n")
-    else:
-        print("All is good here!\n")
+print(f"  Groups: {dict(df_q['group'].value_counts(dropna=False).sort_index())}")
+print(f"  Sites:  {sorted(df_q['site'].dropna().unique())}")
 
-    df = df_q.merge(
-                    df_a,
-                    on="study_id",
-                    how="inner",
-                )
-    df["site"] = site    
-    dfs.append(df[["site"] + quest_cols + list(avg_pairs.keys())])
+# ── Load audiometry ───────────────────────────────────────────────────────────
 
-df_all = pd.concat(dfs, ignore_index=True)
-mapping = {
-            "study_id": "subject_id",
-            "intro_gender": "sex",
-            "esit_a1":"age",
-            "esit_a17": "group"
-            } 
-df_all.rename(columns=mapping, inplace=True)
+print("\nLoading audiometry …")
+df_a = pd.read_excel(AUDIO_FILE, sheet_name="Sheet1")
+print(f"  {len(df_a)} rows, {df_a.shape[1]} columns")
 
-## add more here
-cols_required = [
-                "sex",
-                "age",
-                "PTA4_mean",
-                "site",
-                "group"
-            ]
+audio_keep = ["Subject ID", "PTA4_ARE", "PTA4_ALE", "PTA_HF_ARE", "PTA_HF_ALE"]
+missing_a = [c for c in audio_keep if c not in df_a.columns]
+if missing_a:
+    raise ValueError(f"Audiometry is missing columns: {missing_a}")
 
-df_all.dropna(subset=cols_required, inplace=True)
-df_all["group"] = np.where(df_all["group"] <= tinnitus_thr, 1, 0)
-df_all.sort_values(by=["site", "subject_id"], inplace=True)
+df_a = df_a[audio_keep].copy()
+df_a.rename(columns={"Subject ID": "subject_id"}, inplace=True)
+df_a["subject_id"] = df_a["subject_id"].astype(str)
 
-## more checks
-df_all = df_all[~df_all['subject_id'].isin(["70072", "70079"])] # high HADS
+# Compute bilateral means
+df_a["PTA4_mean"] = df_a[["PTA4_ARE", "PTA4_ALE"]].mean(axis=1)
+df_a["PTA4_HF"]   = df_a[["PTA_HF_ARE", "PTA_HF_ALE"]].mean(axis=1)
+df_a.drop(columns=["PTA4_ARE", "PTA4_ALE", "PTA_HF_ARE", "PTA_HF_ALE"], inplace=True)
 
-print(f"********** sex not 1 or 2 ***********")
-for _, row in df_all.loc[~df_all['sex'].isin([1, 2])].iterrows():
-    print(f"subject_id {row['subject_id']} from site {row['site']} has sex {row['sex']}")
+# ── Merge ─────────────────────────────────────────────────────────────────────
 
-print(f"********** group not 0 or 1 ***********")
-for _, row in df_all.loc[~df_all['group'].isin([0, 1])].iterrows():
-    print(f"subject_id {row['subject_id']} from site {row['site']} has group {row['group']}")
+print("\nMerging on subject_id …")
+q_ids = set(df_q["subject_id"])
+a_ids = set(df_a["subject_id"])
+only_q = sorted(q_ids - a_ids)
+only_a = sorted(a_ids - q_ids)
+if only_q:
+    print(f"  In questionnaire but NOT in audio ({len(only_q)}): {only_q}")
+if only_a:
+    print(f"  In audio but NOT in questionnaire ({len(only_a)}): {only_a}")
 
-df_all = df_all[df_all['sex'].isin([1, 2])]
-df_all = df_all[df_all['group'].isin([0, 1])]
+df = df_q.merge(df_a, on="subject_id", how="inner")
+print(f"  After inner join: {len(df)} subjects")
 
-df_all.to_csv("../material/master.csv", index=False)
+# ── Exclusions ────────────────────────────────────────────────────────────────
+
+n_before = len(df)
+df = df[~df["subject_id"].isin(EXCLUDE_IDS)]
+n_excluded = n_before - len(df)
+if n_excluded:
+    print(f"\n  Excluded {n_excluded} subject(s) (clinical reasons): {EXCLUDE_IDS}")
+
+# ── Quality checks ────────────────────────────────────────────────────────────
+
+required_cols = ["sex", "age", "PTA4_mean", "site", "group"]
+n_before = len(df)
+df.dropna(subset=required_cols, inplace=True)
+n_dropped = n_before - len(df)
+if n_dropped:
+    warn(f"Dropped {n_dropped} row(s) with NaN in required columns {required_cols}.")
+
+print(f"\n{'='*50}")
+print(f"Final dataset: {len(df)} subjects")
+print(f"  Groups : {dict(df['group'].value_counts().sort_index())}")
+print(f"  Sites  : {dict(df.groupby('site').size().sort_index())}")
+print(f"{'='*50}")
+
+# ── Validate sex / group values ───────────────────────────────────────────────
+
+bad_sex = df[~df["sex"].isin([1, 2])]
+if len(bad_sex):
+    print(f"\nSubjects with unexpected sex values ({len(bad_sex)}):")
+    for _, row in bad_sex.iterrows():
+        print(f"  subject_id={row['subject_id']} site={row['site']} sex={row['sex']}")
+    df = df[df["sex"].isin([1, 2])]
+    print(f"  → Removed. Remaining: {len(df)}")
+
+bad_group = df[~df["group"].isin([0, 1])]
+if len(bad_group):
+    print(f"\nSubjects with unexpected group values ({len(bad_group)}):")
+    for _, row in bad_group.iterrows():
+        print(f"  subject_id={row['subject_id']} site={row['site']} group={row['group']}")
+    df = df[df["group"].isin([0, 1])]
+    print(f"  → Removed. Remaining: {len(df)}")
+
+# ── Final column order and save ───────────────────────────────────────────────
+
+col_order = ["subject_id", "site", "group", "age", "sex", "PTA4_mean", "PTA4_HF", "THI", "TFI"]
+col_order = [c for c in col_order if c in df.columns]
+df = df[col_order]
+df.sort_values(["site", "subject_id"], inplace=True)
+df.reset_index(drop=True, inplace=True)
+
+df.to_csv(OUT_FILE, index=False)
+print(f"\nSaved → {OUT_FILE}")
+print(f"Columns: {list(df.columns)}")
+print(df.head(5).to_string(index=False))
