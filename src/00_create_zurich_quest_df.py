@@ -21,7 +21,7 @@ df_reg = pd.read_csv(
 
 ## select only those who had visit 1 and fix wzdc -> wcdc
 df_map = pd.read_csv(fname_ant_to_tide)
-df_map.drop(columns=["Unnamed: 0", "rest_2"], inplace=True)
+df_map.drop(columns=["Unnamed: 0", "rest_2"], inplace=True, errors="ignore")
 paradigms = df_map.columns[2:]
 df_map = df_map[df_map[paradigms].all(axis=1)].reset_index(drop=True)
 df_map["antinomics_id"] = df_map["antinomics_id"].replace("wzdc", "wcdc")
