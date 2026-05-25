@@ -22,7 +22,7 @@ os.makedirs(saving_dir, exist_ok=True)
 # -------------------------------------------------------------------------
 # LOAD & PREPARE DATA
 # -------------------------------------------------------------------------
-df = pd.read_csv("../material/master_new.csv")
+df = pd.read_csv("../material/master_clean.csv")
 cols_to_keep = ["subject_id", "site", "sex", "age", "group", "PTA4_mean", "PTA4_HF", "THI", "TFI"]
 df_plot = df[cols_to_keep].copy()
 df_plot["sex"]   = df_plot["sex"].map({1: "Male", 2: "Female"})
@@ -41,6 +41,11 @@ ids_df = set(df_plot["subject_id"].astype(str))
 only_in_list = sorted(ids_list - ids_df)
 only_in_df   = sorted(ids_df - ids_list)
 common_ids   = ids_list & ids_df
+
+# -------------------------------------------------------------------------
+# FILTER TO MATCHED SUBJECTS  (must come before any stats or HTML)
+# -------------------------------------------------------------------------
+df_plot = df_plot[df_plot["subject_id"].astype(str).isin(common_ids)]
 
 # -------------------------------------------------------------------------
 # STATISTICAL TESTS
@@ -88,8 +93,32 @@ site_stats["sex"] = {"chi2": chi2_sex_site, "p": p_sex_site,
                      **dict(zip(("sig", "color"), _pval_badge(p_sex_site)[1:]))}
 
 # THI–TFI agreement (tinnitus only)
-tin_df = df_plot[df_plot["group"] == "Tinnitus"].dropna(subset=["THI", "TFI"])
+_tin_all   = df_plot[df_plot["group"] == "Tinnitus"]
+tin_df     = _tin_all.dropna(subset=["THI", "TFI"])
+n_miss_thi = _tin_all["THI"].isna().sum()
+n_miss_tfi = _tin_all["TFI"].isna().sum()
 rho_thi_tfi, p_thi_tfi = spearmanr(tin_df["THI"], tin_df["TFI"])
+
+# Missing questionnaire subjects (for HTML table)
+_miss_thi_rows = _tin_all[_tin_all["THI"].isna()][["subject_id", "site"]].copy()
+_miss_tfi_rows = _tin_all[_tin_all["TFI"].isna()][["subject_id", "site"]].copy()
+
+
+def _build_missing_q_table():
+    rows = ""
+    all_missing = pd.concat([
+        _miss_thi_rows.assign(missing="THI"),
+        _miss_tfi_rows.assign(missing="TFI"),
+    ]).groupby(["subject_id", "site"])["missing"].apply(lambda x: " & ".join(sorted(x))).reset_index()
+    all_missing = all_missing.sort_values(["site", "subject_id"])
+    for i, row in all_missing.iterrows():
+        bg = "#f8fafc" if i % 2 == 0 else "#ffffff"
+        rows += (f'<tr style="background:{bg}">'
+                 f'<td>{row["subject_id"]}</td>'
+                 f'<td>{row["site"]}</td>'
+                 f'<td><span style="color:#94a3b8;font-size:12px;">{row["missing"]}</span></td>'
+                 f'</tr>')
+    return rows
 
 # Per-variable descriptive stats
 def _desc(df_in, col):
@@ -114,11 +143,6 @@ print()
 for col, s in group_stats.items():
     print(f"  Group diff [{col}]: {_fmt_p(s['p'])} {s['sig']}")
 print(f"\n  THI–TFI Spearman rho = {rho_thi_tfi:.3f}, {_fmt_p(p_thi_tfi)}")
-
-# -------------------------------------------------------------------------
-# FILTER TO MATCHED SUBJECTS
-# -------------------------------------------------------------------------
-df_plot = df_plot[df_plot["subject_id"].astype(str).isin(common_ids)]
 
 # -------------------------------------------------------------------------
 # HTML HELPER FUNCTIONS
@@ -294,7 +318,7 @@ html_content = f"""<!DOCTYPE html>
 
 <div class="page-header">
   <h1>Tinnorm — Demographics &amp; Data Quality Report</h1>
-  <p>Generated from master_new.csv · Matched against features directory</p>
+  <p>Generated from master_clean.csv · Matched against features directory</p>
 </div>
 
 <!-- KPIs -->
@@ -335,7 +359,7 @@ html_content = f"""<!DOCTYPE html>
   <div class="card">
     <h2>THI ↔ TFI Agreement (Tinnitus only)</h2>
     <p style="font-size:13px;color:#475569;">Spearman correlation between Tinnitus Handicap Inventory and
-    Tinnitus Functional Index scores across all tinnitus subjects (N = {len(tin_df)}).</p>
+    Tinnitus Functional Index. Only subjects with <em>both</em> scores are included.</p>
     <div class="rho-box">
       <div>
         <span class="rho-val">ρ = {rho_thi_tfi:.3f}</span><br>
@@ -344,7 +368,10 @@ html_content = f"""<!DOCTYPE html>
         </span>
       </div>
     </div>
-    <p class="note">N = {len(tin_df)} tinnitus subjects with both THI and TFI available.</p>
+    <p class="note">
+      N = {len(tin_df)} of {len(_tin_all)} tinnitus subjects have both scores available
+      ({n_miss_thi} missing THI · {n_miss_tfi} missing TFI).
+    </p>
   </div>
 </div>
 
@@ -391,6 +418,18 @@ html_content = f"""<!DOCTYPE html>
     TFI: 0–100 (tinnitus group only).</p>
     <table>
       {_build_tinnitus_severity_table()}
+    </table>
+  </div>
+</div>
+
+<!-- Missing questionnaire scores -->
+<div class="grid-1">
+  <div class="card">
+    <h2>Missing Questionnaire Scores (THI / TFI) — tinnitus group only</h2>
+    <p class="note">{n_miss_thi} missing THI · {n_miss_tfi} missing TFI · not excluded from any EEG analysis.</p>
+    <table>
+      <tr><th>Subject ID</th><th>Site</th><th>Missing</th></tr>
+      {_build_missing_q_table()}
     </table>
   </div>
 </div>
