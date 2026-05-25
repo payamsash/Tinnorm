@@ -1,11 +1,40 @@
 import os
 from pathlib import Path
+import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from neuroHarmonize import (
     harmonizationLearn,
     harmonizationApply
     )
+
+
+def _select_bio_covars(df_merged: pd.DataFrame,
+                       bio_covars: list,
+                       r_threshold: float = 0.85) -> list:
+    """
+    Drop PTA4_mean from bio_covars if it is highly correlated with PTA4_HF
+    (|Pearson r| > r_threshold), to avoid multicollinearity in ComBat.
+
+    PTA4_HF is retained because it is more specific to the high-frequency
+    hearing loss associated with tinnitus.  Run 02c_stats_checks.py section 12
+    for a full collinearity report with scatter plot and VIF table.
+    """
+    pair = [c for c in ["PTA4_mean", "PTA4_HF"]
+            if c in bio_covars and c in df_merged.columns]
+    if len(pair) < 2:
+        return bio_covars
+
+    valid = df_merged[pair].dropna()
+    r = float(np.corrcoef(valid["PTA4_mean"].values, valid["PTA4_HF"].values)[0, 1])
+    print(f"  PTA4_mean–PTA4_HF Pearson r = {r:.3f}  (threshold = {r_threshold})")
+
+    if abs(r) > r_threshold:
+        print("  → High collinearity: dropping PTA4_mean, retaining PTA4_HF in ComBat.")
+        return [c for c in bio_covars if c != "PTA4_mean"]
+
+    print("  → Collinearity OK: using both PTA4_mean and PTA4_HF.")
+    return bio_covars
 
 def harmonize(                
                 preproc_level,
@@ -47,7 +76,7 @@ def harmonize(
     Notes
     -----
     - Subject IDs are inferred from filenames.
-    - Covariates are loaded from '../material/master.csv'.
+    - Covariates are loaded from '../material/master_clean.csv'.
     - Site effects are harmonized while preserving biological covariates
         (age, sex, PTA4_mean).
     - For 'aperiodic' modality, no harmonization is applied; merged data
@@ -56,36 +85,61 @@ def harmonize(
         and (if applicable) connectivity mode.
     """
 
-    ## get file names
-    fnames = []
-    for fname in features_dir.iterdir():
-        text = f"{modality}_{space}_preproc_{preproc_level}.zip" # fix this
-        if str(fname).endswith(text):
-            fnames.append(fname)
+    ## Build expected file paths from master_clean subject IDs.
+    ## This avoids scanning the whole directory (which could pick up corrupted
+    ## or unrelated files and cause zipfile.BadZipFile errors).
+    df_master = pd.read_csv("../material/master_clean.csv")
+    valid_ids = df_master["subject_id"].astype(str).tolist()
+    suffix = f"{modality}_{space}_preproc_{preproc_level}.zip"
+
+    fnames, missing = [], []
+    for sid in valid_ids:
+        fpath = features_dir / f"sub-{sid}_{suffix}"
+        if fpath.exists():
+            fnames.append((sid, fpath))
+        else:
+            missing.append(sid)
+
+    if missing:
+        print(f"  {len(missing)} subjects have no {suffix} file "
+              f"(first 5: {missing[:5]})")
+    if not fnames:
+        print(f"  No feature files found for {suffix} — skipping.")
+        return
 
     ## read and create data matrix
-    print(f"reading the {modality} in {space} features ...")
+    print(f"reading the {modality} in {space} features ({len(fnames)} subjects)...")
     dfs_list = []
-    for fname in tqdm(fnames):
-        subject_id = fname.stem[4:9]
-        df_subject = pd.read_csv(fname, index_col=None)
-            
+    for subject_id, fname in tqdm(fnames):
+        try:
+            df_subject = pd.read_csv(fname, index_col=None)
+        except Exception as e:
+            print(f"  Warning: could not read {fname.name}: {e} — skipping.")
+            continue
+
         if modality == "conn":
             df_subject = df_subject.set_index(df_subject.columns[0]).T
             df_subject.columns.name = None
             df_subject = df_subject.filter(regex=rf'_{conn_mode}$')
-        
+
         df_subject.drop(columns="Unnamed: 0", inplace=True, errors="ignore")
-        df_mean = df_subject.mean(axis=0).to_frame().T # per subject
+        df_mean = df_subject.mean(axis=0).to_frame().T
         df_mean["subject_id"] = subject_id
         dfs_list.append(df_mean)
+
+    if not dfs_list:
+        print(f"  All reads failed for {suffix} — skipping.")
+        return
 
     df_data = pd.concat(dfs_list)
     df_data['subject_id'] = df_data['subject_id'].astype(str)
 
     ## create covariates df and match 2 dfs
-    df_q = pd.read_csv("../material/master.csv")
-    cols = ["site", "age", "sex", "subject_id", "PTA4_mean", "group"]
+    df_q = pd.read_csv("../material/master_clean.csv")
+    _covar_candidates = ["site", "age", "sex", "subject_id", "PTA4_mean", "PTA4_HF", "group"]
+    cols = [c for c in _covar_candidates if c in df_q.columns]
+    # Biological covariates passed to ComBat (site handled separately as batch effect)
+    _bio_covars = [c for c in ["age", "sex", "PTA4_mean", "PTA4_HF"] if c in df_q.columns]
     df_covars = df_q[cols]
     df_covars.rename(columns={"site": "SITE"}, inplace=True)
     df_covars['subject_id'] = df_covars['subject_id'].astype(str)
@@ -98,6 +152,9 @@ def harmonize(
     dropped_from_df2 = set(df_covars['subject_id']) - set(df_data['subject_id'])
     print(f"subjects missing in data: {list(sorted(dropped_from_df2))}")
 
+    ## Check PTA collinearity — drop PTA4_mean if highly correlated with PTA4_HF
+    _bio_covars = _select_bio_covars(df_merged, _bio_covars)
+
     ## harmonize
     if modality == "aperiodic":
         for hm_mode in ["hm", "residual"]:
@@ -106,8 +163,33 @@ def harmonize(
             df_merged.to_csv(fname_save, index=False)
 
     else:
-        data_full = df_merged.iloc[:, :-len(cols)].to_numpy()
-        df_cov_full = df_merged[["SITE", "age",	"sex", "PTA4_mean"]]
+        # Fill NaN in features with column means before ComBat.
+        # NaN from bad channels/epochs cause harmonizationLearn to return
+        # NaN residuals and zero harmonized values.
+        feature_slice = df_merged.iloc[:, :-len(cols)]
+        nan_count = int(feature_slice.isna().sum().sum())
+        if nan_count > 0:
+            print(f"  Filling {nan_count} NaN values in features with column means.")
+            col_means = feature_slice.mean()
+            df_merged.iloc[:, :-len(cols)] = feature_slice.fillna(col_means)
+
+        data_full = df_merged.iloc[:, :-len(cols)].to_numpy().astype(np.float64)
+
+        # Sensor-space power values are on the order of 1e-12 V²/Hz — too small
+        # for ComBat's numerical routines (rounds to zero). Log10-transform brings
+        # them to a normal scale and also makes the distribution approximately
+        # Gaussian, satisfying ComBat's assumptions. Source power is already on a
+        # large scale so no transform is applied there.
+        log_transform = (modality == "power" and space == "sensor")
+        if log_transform:
+            data_full = np.log10(np.clip(data_full, a_min=1e-30, a_max=None))
+            print("  Applied log10 transform to sensor power features.")
+
+        df_cov_full = df_merged[["SITE"] + _bio_covars].reset_index(drop=True)
+
+        print(f"  data_full shape: {data_full.shape}  "
+              f"NaN: {np.isnan(data_full).sum()}  "
+              f"sites: {df_cov_full['SITE'].unique().tolist()}")
 
         ## get the residuals (s_data)
         _, _, s_data = harmonizationLearn(
@@ -117,11 +199,13 @@ def harmonize(
                                             seed=0,
                                             return_s_data=True
                                             )
-        
+
         ## learn the model on controls
         df_train = df_merged.query('group == 0')
-        data_controls = df_train.iloc[:, :-len(cols)].to_numpy()
-        df_cov_controls = df_train[["SITE",	"age", "sex", "PTA4_mean"]]
+        data_controls = df_train.iloc[:, :-len(cols)].to_numpy().astype(np.float64)
+        if log_transform:
+            data_controls = np.log10(np.clip(data_controls, a_min=1e-30, a_max=None))
+        df_cov_controls = df_train[["SITE"] + _bio_covars].reset_index(drop=True)
         hm_model, _ = harmonizationLearn(
                                             data_controls,
                                             df_cov_controls,
@@ -162,9 +246,9 @@ if __name__ == "__main__":
     os.makedirs(hm_dir, exist_ok=True)
     
     preproc_levels = [1, 2, 3]
-    spaces = ["sensor", "source"][1:]
-    modalities = ["power", "conn", "aperiodic"]
-    conn_modes = ["pli", "plv", "coh"][2:]
+    spaces = ["sensor", "source"]
+    modalities = ["power", "conn", "aperiodic"][2:]
+    conn_modes = ["pli", "plv", "coh"]
 
     for preproc_level in preproc_levels:
         os.makedirs(hm_dir / f"preproc_{preproc_level}", exist_ok=True)
@@ -173,19 +257,14 @@ if __name__ == "__main__":
             os.makedirs(hm_dir / f"preproc_{preproc_level}" / space, exist_ok=True)
 
             for modality in modalities:
-                for conn_mode in conn_modes:
-                    
-                    fname_save_1 = hm_dir / f"preproc_{preproc_level}" / space / f"{modality}_hm.csv"
-                    fname_save_2 = hm_dir / f"preproc_{preproc_level}" / space / f"{modality}_{conn_mode}_hm.csv"
-                    
-                    if fname_save_1.exists() or fname_save_2.exists():
+                if modality == "conn":
+                    for conn_mode in conn_modes:
+                        fname_save = hm_dir / f"preproc_{preproc_level}" / space / f"{modality}_{conn_mode}_hm.csv"
+                        if fname_save.exists():
+                            continue
+                        harmonize(preproc_level, space, modality, conn_mode, hm_dir, features_dir)
+                else:
+                    fname_save = hm_dir / f"preproc_{preproc_level}" / space / f"{modality}_hm.csv"
+                    if fname_save.exists():
                         continue
-                    else:
-                        harmonize(
-                                    preproc_level,
-                                    space,
-                                    modality,
-                                    conn_mode,
-                                    hm_dir,
-                                    features_dir
-                                    )
+                    harmonize(preproc_level, space, modality, None, hm_dir, features_dir)
