@@ -304,13 +304,14 @@ def run_nm_loso(
 
 if __name__ == "__main__":
 
-    tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
+    # tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
+    tinnorm_dir = Path("/home/ubuntu/volume/Tinnorm")
     hm_dir = tinnorm_dir / "harmonized"
     models_dir = tinnorm_dir / "models"
     os.makedirs(models_dir, exist_ok=True)
 
-    preproc_levels = [1, 2, 3][:1]
-    spaces = ["sensor", "source"][:1]
+    preproc_levels = [1, 2, 3]
+    spaces = ["sensor", "source"]
     # "graph" = graph-theory metrics (clustering, efficiency) from 07b_create_graph_metrics.py
     modalities = ["aperiodic", "conn", "power", "global", "regional", "graph"][2:3]
     conn_modes = ["pli", "plv", "coh"]
