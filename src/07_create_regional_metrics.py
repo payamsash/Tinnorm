@@ -103,9 +103,10 @@ def compute_regional_metrics(
     df_res = pd.concat(df_re_list, axis=1)
     df_nss = pd.concat(df_ns_list, axis=1)
 
-    cols = ["subject_id", "SITE", "age", "sex", "PTA4_mean", "group"]
-    df_res = pd.concat([df_res, df_conn[cols]], axis=1)
-    df_nss = pd.concat([df_nss, df_conn[cols]], axis=1)
+    _covar_candidates = ["subject_id", "SITE", "age", "sex", "PTA4_mean", "PTA4_HF", "group"]
+    covar_cols = [c for c in _covar_candidates if c in df_conn.columns]
+    df_res = pd.concat([df_res, df_conn[covar_cols]], axis=1)
+    df_nss = pd.concat([df_nss, df_conn[covar_cols]], axis=1)
 
     ## save it in harmonized folder path
     for df, reg_mode in zip([df_res, df_nss], ["regional", "global"]):
@@ -120,8 +121,8 @@ if __name__ == "__main__":
     hm_dir = tinnorm_dir / "harmonized"
     
     preproc_levels = [1, 2, 3]
-    spaces = ["sensor", "source"][1:]
-    conn_modes = ["pli", "plv", "coh"][2:]
+    spaces = ["sensor", "source"]
+    conn_modes = ["pli", "plv", "coh"]
     hm_modes = ["hm", "residual"]
 
     for preproc_level in preproc_levels:
@@ -130,7 +131,7 @@ if __name__ == "__main__":
                 for hm_mode in hm_modes:
 
                     saving_dir = hm_dir / f"preproc_{preproc_level}" / space
-                    fname_save = saving_dir / f"conn_{hm_mode}.csv"
+                    fname_save = saving_dir / f"regional_{conn_mode}_{hm_mode}.csv"
 
                     if fname_save.exists():
                         continue
