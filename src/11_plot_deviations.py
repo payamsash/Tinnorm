@@ -1,456 +1,370 @@
-from pathlib import Path
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.colors import ListedColormap
+"""
+11_plot_deviations.py
 
-from seaborn import color_palette
-from mne import read_labels_from_annot, vertex_to_mni
+Map normative-model Z-score deviations onto the fsaverage cortical surface.
+
+For each (preproc_level × space × modality × conn_mode × freq_band):
+  tinnitus → full_model/results/Z_test.csv          (unbiased: never in training)
+  controls → loso/loso_controls_Z.csv               (unbiased: held out by site)
+
+Two summaries per ROI per group:
+  mean_Z   — mean Z-score across subjects (signed; how far from normal on average)
+  pct_dev  — % of subjects with |Z| > 1.96 (proportion with significant deviation)
+
+Where both groups exist a difference map (tinnitus − control mean_Z) is also saved.
+
+Aperiodic modality has no freq bands: exponent and offset are plotted separately.
+Graph modality columns carry no conn_mode suffix: regex filtered accordingly.
+
+Run from src/:  python 11_plot_deviations.py
+"""
+
+import re
+from pathlib import Path
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
+from mne import read_labels_from_annot
 from mne.viz import Brain
-from nilearn.plotting import plot_connectome
-from nichord.chord import plot_chord
+
+
+# ── Config ────────────────────────────────────────────────────────────────────
+
+TINNORM_DIR = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
+MODELS_DIR  = TINNORM_DIR / "models"
+SAVING_DIR  = TINNORM_DIR / "plots" / "deviations"
+
+THR        = 1.96
+PALETTE    = sns.color_palette("ch:", n_colors=256)
+PALETTE_DIV = sns.color_palette("RdBu_r", n_colors=256)  # for diff maps
+FIG_KW     = {"format": "pdf", "dpi": 300, "bbox_inches": "tight"}
+
+_N_LABELS: int | None = None   # cached label count
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _get_n_labels(subject: str = "fsaverage", subjects_dir=None) -> int:
+    global _N_LABELS
+    if _N_LABELS is None:
+        _N_LABELS = len(read_labels_from_annot(
+            subject=subject, subjects_dir=subjects_dir, verbose=False)) - 1
+    return _N_LABELS
+
+
+def _discover_freq_bands(csv_path: Path) -> list:
+    """Return unique EEG freq bands from CSV columns, in physiological order."""
+    df = pd.read_csv(csv_path, nrows=1)
+    meta = {"subject_id", "subject_ids", "observations", "Unnamed: 0"}
+    cols = [c for c in df.columns if c not in meta]
+    band_re = re.compile(
+        r'_((?:delta|theta|alpha|beta|gamma|broadband)(?:_\d+)?)(?:_\w+)?$')
+    bands = set()
+    for c in cols:
+        m = band_re.search(c)
+        if m:
+            bands.add(m.group(1))
+    order = ["delta", "theta",
+             "alpha_0", "alpha_1", "alpha_2",
+             "beta_0",  "beta_1",  "beta_2",
+             "gamma_0", "gamma_1", "gamma_2", "broadband"]
+    return [b for b in order if b in bands] + sorted(bands - set(order))
+
+
+def _filter_band(df: pd.DataFrame, freq_band: str,
+                 conn_mode: str | None, modality: str) -> pd.DataFrame:
+    """
+    Return columns matching this freq_band.
+
+    graph_* columns have no conn_mode suffix ({roi}_{band}_{metric}), so we
+    don't append conn_mode to the regex for that modality.
+    """
+    if modality == "graph" or conn_mode is None:
+        regex = freq_band
+    else:
+        regex = f"{freq_band}_{conn_mode}"
+    result = df.filter(regex=regex).apply(pd.to_numeric, errors="coerce")
+    return result.dropna(axis=1, how="all")
+
+
+def _to_roi_matrix(df_band: pd.DataFrame, n_rois: int) -> np.ndarray:
+    """
+    Convert a (n_subjects, n_cols) band DataFrame to (n_subjects, n_rois).
+
+    Works when n_cols == n_rois (power, regional, global) and when
+    n_cols == n_rois × k (graph: k metrics per ROI — averaged).
+    """
+    arr   = df_band.values.astype(float)
+    n_col = arr.shape[1]
+    if n_col == n_rois:
+        return arr
+    if n_col % n_rois == 0:
+        k = n_col // n_rois
+        return arr.reshape(arr.shape[0], n_rois, k).mean(axis=2)
+    raise ValueError(
+        f"Cannot map {n_col} columns to {n_rois} ROIs "
+        f"(not divisible). Check band filter.")
+
+
+# ── Brain surface plot ────────────────────────────────────────────────────────
 
 def plot_brain(
         metric_vals,
-        palette,
-        surf="inflated",
-        subject="fsaverage",
+        palette=None,
+        surf: str = "inflated",
+        subject: str = "fsaverage",
         subjects_dir=None,
-        alpha=0.7,
-        ):
-        """
-        Plot region-wise brain metrics on the fsaverage cortical surface.
-
-        Each cortical label is colored according to the corresponding metric value.
-        Four standard views are rendered and combined into a single matplotlib figure:
-        left/right hemispheres * lateral/medial views.
-
-        Parameters
-        ----------
-        metric_vals : array-like, shape (n_labels,)
-                Metric values associated with cortical labels from the annotation.
-                The order must match the labels returned by
-                ``mne.read_labels_from_annot(..., subject=subject)[:-1]``.
-        palette : seaborn color palette or None
-                Seaborn palette used to map normalized metric values to colors.
-                If None, a dark red sequential palette is used.
-        surf : str
-                Surface to use for visualization (e.g., ``"pial"``,
-                ``"inflated"``, ``"pial_semi_inflated"``).
-        subject : str
-                FreeSurfer subject name (default: ``"fsaverage"``).
-        subjects_dir : path-like or None
-                FreeSurfer subjects directory. If None, uses MNE default.
-        alpha : float
-                Alpha transparency for labels (0-1).
-
-        Returns
-        -------
-        fig : matplotlib.figure.Figure
-                Figure containing the four brain views.
-
-        Notes
-        -----
-        - This function uses ``mne.viz.Brain`` with the ``pyvistaqt`` backend.
-        - Metric values are min-max normalized before color mapping.
-        - Screenshots are automatically cropped to remove white margins.
-        """
-
-        # Prepare metric values
-        metric_vals = np.asarray(metric_vals, dtype=float)
-        if metric_vals.ndim != 1:
-                raise ValueError("metric_vals must be a 1D array.")
-
-        vmin, vmax = metric_vals.min(), metric_vals.max()
-        metrics_norm = (metric_vals - vmin) / (vmax - vmin)
-
-        # Load labels
-        labels = read_labels_from_annot(subject=subject, subjects_dir=subjects_dir, verbose=False)[:-1]
-
-        if len(labels) != len(metric_vals):
-                raise ValueError(
-                f"Expected {len(labels)} metric values, got {len(metric_vals)}."
-                )
-
-        # Color mapping
-        colors = np.asarray(palette.as_hex())
-        color_idx = np.round(metrics_norm * (len(colors) - 1)).astype(int) ## most important line
-        label_colors = colors[color_idx]
-        
-        # Brain plotting helper
-        brain_kwargs = dict(
-                subject=subject,
-                subjects_dir=subjects_dir,
-                surf=surf,
-                background="white",
-                cortex=["#b8b4ac", "#b8b4ac"],
-        )
-
-        def _render_view(hemi, view):
-                """Render one brain view and return cropped screenshot."""
-                brain = Brain(hemi=hemi, views=view, **brain_kwargs)
-
-                for label, color in zip(labels, label_colors):
-                        if label.hemi == hemi:
-                                brain.add_label(
-                                label,
-                                hemi=hemi,
-                                color=color,
-                                borders=False,
-                                alpha=alpha,
-                                )
-                brain.add_annotation("aparc", borders=True, color="white")                           
-                img = brain.screenshot()
-                brain.close()
-
-                # Crop white margins
-                nonwhite = (img != 255).any(axis=-1)
-                rows = nonwhite.any(axis=1)
-                cols = nonwhite.any(axis=0)
-
-                return img[rows][:, cols]
-
-        # Render views
-        screenshots = [
-                _render_view("rh", "lateral"),
-                _render_view("lh", "lateral"),
-                # _render_view("lh", "medial"),
-                # _render_view("rh", "medial"),
-        ]
-        
-        # Assemble figure
-        fig, axes = plt.subplots(1, 2, figsize=(9, 7))
-        fig.subplots_adjust(hspace=0.05, wspace=0.05)
-
-        im = None
-        for ax, img in zip(axes.flat, screenshots):
-                im = ax.imshow(img, 
-                                cmap=ListedColormap(palette),
-                                vmin=vmin,
-                                vmax=vmax
-                                )
-                ax.axis("off")
-
-        cbar = fig.colorbar(
-                        im,
-                        ax=axes,
-                        orientation="horizontal",
-                        fraction=0.08,
-                        pad=0.1,
-                        shrink=0.5
-                        )
-        cbar.set_label("W score")
-        cbar.set_ticks([vmin, vmax])
-        cbar.set_ticklabels([f"Min: {vmin:.2f}", f"Max: {vmax:.2f}"])
-
-        return fig
-
-
-def plot_brain_connectome(
-                        metric_vals,
-                        palette,
-                        subject="fsaverage",
-                        subjects_dir=None,
-                        edge_threshold_1="99%",
-                        edge_threshold_2="98%",
-                        ):
-        """
-        Plot brain connectivity using both a 3D connectome view and a circular (chord) diagram.
-
-        This function:
-        1. Converts a 1D array of metric values (representing the lower triangle of a
-        symmetric connectivity matrix) into a full adjacency matrix.
-        2. Computes node coordinates in MNI space based on FreeSurfer labels.
-        3. Plots the 3D brain connectome using nilearn's plot_connectome.
-        4. Plots a circular connectome (chord diagram) showing connectivity between
-        brain regions and their associated functional networks.
-
-        Parameters
-        ----------
-        metric_vals : np.ndarray
-                1D array of connectivity or metric values corresponding to the lower triangle
-                (excluding diagonal) of a symmetric ROI × ROI matrix.
-                Length must be n_labels*(n_labels-1)/2, where n_labels is the number of ROIs.
-        palette : list or np.ndarray
-                A list of RGB tuples or colormap array used to color the edges in the plots.
-        subject : str, default "fsaverage"
-                Name of the FreeSurfer subject (used to read labels and compute MNI coordinates).
-        subjects_dir : str or None, default None
-                Path to FreeSurfer SUBJECTS_DIR. If None, uses the environment variable SUBJECTS_DIR.
-        edge_threshold : str or float, default "98%"
-                Threshold for edges to be displayed. Can be a percentile string like "98%" or a numeric value.
-
-        Returns
-        -------
-        None
-                The function plots figures but does not return any values.
-
-        Notes
-        -----
-        - The function expects FreeSurfer annotations for the aparc atlas.
-        - Circular connectome plotting uses `map_roi_to_yeo7()` to assign ROIs to Yeo 7 networks.
-        - Edge weights for the chord diagram are computed as the mean of `df.mean().values`.
-        - Node coordinates are converted from label centers to MNI space.
-        - Both 3D brain connectome and circular plots are displayed in the same call.
-
-        """
-
-        labels = read_labels_from_annot(subject=subject, subjects_dir=subjects_dir, verbose=False)[:-1]
-
-        ## creating node coords
-        node_coords = []
-        for label in labels:
-
-                if label.hemi == 'lh':
-                        hemi = 0
-                if label.hemi == 'rh':
-                        hemi = 1
-        
-                center_vertex = label.center_of_mass(
-                                                subject=subject, 
-                                                restrict_vertices=False, 
-                                                subjects_dir=subjects_dir
-                                                )
-                mni_pos = vertex_to_mni(
-                                        center_vertex,
-                                        hemis=hemi,
-                                        subject=subject,
-                                        subjects_dir=subjects_dir
-                                        )
-                node_coords.append(mni_pos)
-
-        node_coords = np.array(node_coords)
-        
-        ## creating the graph matrix
-        graph = np.zeros((len(labels), len(labels)))
-        r, c = np.tril_indices(len(labels), k=-1)
-        graph[r, c] = metric_vals
-        graph[c, r] = metric_vals
-        
-        ## plotting the brain connectome
-        fig, ax = plt.subplots(1, 1, figsize=(11, 3))
-        edge_kwargs = {"lw": 2}
-        plot_connectome(
-                        adjacency_matrix=graph,
-                        node_coords=node_coords,
-                        display_mode="lzry",
-                        edge_vmin=None,
-                        edge_vmax=None,
-                        edge_cmap=ListedColormap(palette),
-                        node_color='k',
-                        node_size=10,
-                        axes=ax,
-                        colorbar=True,
-                        edge_threshold=edge_threshold_1,
-                        edge_kwargs=edge_kwargs
-                        )
-        fig.tight_layout()
-
-        ## plotting the circular connectome
-        edge_idxs = [(i, j) for i, j in zip(r, c)]
-        network_order = list(set(map_roi_to_yeo7().values()))
-        network_color = dict(zip(network_order, color_palette("Set2")))
-
-        plot_chord(
-                idx_to_label=map_roi_to_yeo7(),
-                edges=edge_idxs,
-                edge_weights=df.mean().values,
-                network_order=network_order,
-                network_colors=network_color,
-                linewidths=4,
-                cmap=ListedColormap(palette),
-                black_BG=True,
-                label_fontsize=18,
-                edge_threshold=edge_threshold_2
-                )
-        return fig, plt.gcf()
-
-
-def map_roi_to_yeo7():
-        roi_to_yeo7 = {
-                0: "VAN",   # bankssts-lh
-                1: "VAN",   # bankssts-rh
-
-                2: "DMN",   # caudalanteriorcingulate-lh
-                3: "DMN",   # caudalanteriorcingulate-rh
-
-                4: "DAN",   # caudalmiddlefrontal-lh
-                5: "DAN",   # caudalmiddlefrontal-rh
-
-                6: "VIS",   # cuneus-lh
-                7: "VIS",   # cuneus-rh
-
-                8: "DMN",   # entorhinal-lh
-                9: "DMN",   # entorhinal-rh
-
-                10: "DMN",   # frontalpole-lh
-                11: "DMN",   # frontalpole-rh
-
-                12: "VAN",   # fusiform-lh
-                13: "VAN",   # fusiform-rh
-
-                14: "VAN",   # inferiorparietal-lh
-                15: "VAN",   # inferiorparietal-rh
-
-                16: "VIS",   # inferiortemporal-lh
-                17: "VIS",   # inferiortemporal-rh
-
-                18: "VAN",   # insula-lh
-                19: "VAN",   # insula-rh
-
-                20: "DMN",   # isthmuscingulate-lh
-                21: "DMN",   # isthmuscingulate-rh
-
-                22: "VIS",   # lateraloccipital-lh
-                23: "VIS",   # lateraloccipital-rh
-
-                24: "FPN",   # lateralorbitofrontal-lh
-                25: "FPN",   # lateralorbitofrontal-rh
-
-                26: "VIS",   # lingual-lh
-                27: "VIS",   # lingual-rh
-
-                28: "DMN",   # medialorbitofrontal-lh
-                29: "DMN",   # medialorbitofrontal-rh
-
-                30: "VAN",   # middletemporal-lh
-                31: "VAN",   # middletemporal-rh
-
-                32: "SMN",   # paracentral-lh
-                33: "SMN",   # paracentral-rh
-
-                34: "DMN",   # parahippocampal-lh
-                35: "DMN",   # parahippocampal-rh
-
-                36: "FPN",   # parsopercularis-lh
-                37: "FPN",   # parsopercularis-rh
-
-                38: "FPN",   # parsorbitalis-lh
-                39: "FPN",   # parsorbitalis-rh
-
-                40: "FPN",   # parstriangularis-lh
-                41: "FPN",   # parstriangularis-rh
-
-                42: "VIS",   # pericalcarine-lh
-                43: "VIS",   # pericalcarine-rh
-
-                44: "SMN",   # postcentral-lh
-                45: "SMN",   # postcentral-rh
-
-                46: "DMN",   # posteriorcingulate-lh
-                47: "DMN",   # posteriorcingulate-rh
-
-                48: "SMN",   # precentral-lh
-                49: "SMN",   # precentral-rh
-
-                50: "DMN",   # precuneus-lh
-                51: "DMN",   # precuneus-rh
-
-                52: "DMN",   # rostralanteriorcingulate-lh
-                53: "DMN",   # rostralanteriorcingulate-rh
-
-                54: "FPN",   # rostralmiddlefrontal-lh
-                55: "FPN",   # rostralmiddlefrontal-rh
-
-                56: "FPN",   # superiorfrontal-lh
-                57: "FPN",   # superiorfrontal-rh
-
-                58: "DAN",   # superiorparietal-lh
-                59: "DAN",   # superiorparietal-rh
-
-                60: "SMN",   # superiortemporal-lh
-                61: "SMN",   # superiortemporal-rh
-
-                62: "VAN",   # supramarginal-lh
-                63: "VAN",   # supramarginal-rh
-
-                64: "DMN",   # temporalpole-lh
-                65: "DMN",   # temporalpole-rh
-
-                66: "SMN",   # transversetemporal-lh
-                67: "SMN"    # transversetemporal-rh
-        }
-        return roi_to_yeo7
-
-def save_plot(metric_vals, prefix, saving_dir, extra=None):
-        """Helper to plot and save one or multiple figures."""
-        figs = plot_func(metric_vals=metric_vals, palette=palette)
-
-        if not isinstance(figs, (list, tuple)):
-                figs = [figs]
-
-        for i, fig in enumerate(figs):
-                parts = [prefix, mode]
-                if extra:
-                        parts.append(extra)
-                parts.extend([data_mode, freq_band, f"preproc_level_{preproc_level}"])
-                if len(figs) > 1:
-                        parts.append(f"fig{i+1}")
-                
-                fname = saving_dir / "_".join(parts)
-                fig.savefig(fname.with_suffix(".pdf"), **fig_kwargs)
+        alpha: float = 0.8,
+        cbar_label: str = "value",
+) -> plt.Figure:
+    """
+    Map per-ROI scalar values onto fsaverage (4 views: LH/RH × lateral/medial).
+
+    Colormap range is the 2nd–98th percentile so outlier ROIs don't compress
+    the scale. Values outside the range still receive the nearest palette colour.
+    """
+    if palette is None:
+        palette = PALETTE
+
+    metric_vals = np.asarray(metric_vals, dtype=float)
+    if metric_vals.ndim != 1:
+        raise ValueError("metric_vals must be 1-D.")
+
+    labels = read_labels_from_annot(
+        subject=subject, subjects_dir=subjects_dir, verbose=False)[:-1]
+    if len(labels) != len(metric_vals):
+        raise ValueError(
+            f"Expected {len(labels)} values (n_labels), got {len(metric_vals)}.")
+
+    vmin = float(np.percentile(metric_vals, 2))
+    vmax = float(np.percentile(metric_vals, 98))
+    if vmin == vmax:
+        vmin -= 1e-6; vmax += 1e-6
+    clipped = np.clip(metric_vals, vmin, vmax)
+    norm    = (clipped - vmin) / (vmax - vmin)
+
+    colors_hex   = np.array([mcolors.to_hex(c) for c in palette])
+    label_colors = colors_hex[np.round(norm * (len(colors_hex) - 1)).astype(int)]
+
+    brain_kw = dict(subject=subject, subjects_dir=subjects_dir,
+                    surf=surf, background="white",
+                    cortex=["#b8b4ac", "#b8b4ac"])
+
+    def _render(hemi, view):
+        brain = Brain(hemi=hemi, views=view, **brain_kw)
+        for lbl, color in zip(labels, label_colors):
+            if lbl.hemi == hemi:
+                brain.add_label(lbl, hemi=hemi, color=color,
+                                borders=False, alpha=alpha)
+        brain.add_annotation("aparc", borders=True, color="white")
+        img = brain.screenshot()
+        brain.close()
+        nw = (img != 255).any(axis=-1)
+        return img[nw.any(axis=1)][:, nw.any(axis=0)]
+
+    imgs = [
+        _render("lh", "lateral"),
+        _render("rh", "lateral"),
+        _render("lh", "medial"),
+        _render("rh", "medial"),
+    ]
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 7))
+    fig.subplots_adjust(hspace=0.03, wspace=0.03)
+    for ax, img in zip(axes.flat, imgs):
+        ax.imshow(img)
+        ax.axis("off")
+
+    sm   = plt.cm.ScalarMappable(
+        cmap=mcolors.ListedColormap(palette),
+        norm=mcolors.Normalize(vmin=vmin, vmax=vmax))
+    cbar = fig.colorbar(sm, ax=axes, orientation="horizontal",
+                        fraction=0.04, pad=0.06, shrink=0.45)
+    cbar.set_label(cbar_label)
+    cbar.set_ticks([vmin, vmax])
+    cbar.set_ticklabels([f"{vmin:.3g}", f"{vmax:.3g}"])
+    return fig
+
+
+# ── Yeo-7 network mapping ─────────────────────────────────────────────────────
+
+def map_roi_to_yeo7() -> dict:
+    """Aparc label index → Yeo-7 network abbreviation."""
+    return {
+        0:  "VAN",  1:  "VAN",   # bankssts
+        2:  "DMN",  3:  "DMN",   # caudalanteriorcingulate
+        4:  "DAN",  5:  "DAN",   # caudalmiddlefrontal
+        6:  "VIS",  7:  "VIS",   # cuneus
+        8:  "DMN",  9:  "DMN",   # entorhinal
+        10: "DMN",  11: "DMN",   # frontalpole
+        12: "VAN",  13: "VAN",   # fusiform
+        14: "VAN",  15: "VAN",   # inferiorparietal
+        16: "VIS",  17: "VIS",   # inferiortemporal
+        18: "VAN",  19: "VAN",   # insula
+        20: "DMN",  21: "DMN",   # isthmuscingulate
+        22: "VIS",  23: "VIS",   # lateraloccipital
+        24: "FPN",  25: "FPN",   # lateralorbitofrontal
+        26: "VIS",  27: "VIS",   # lingual
+        28: "DMN",  29: "DMN",   # medialorbitofrontal
+        30: "VAN",  31: "VAN",   # middletemporal
+        32: "SMN",  33: "SMN",   # paracentral
+        34: "DMN",  35: "DMN",   # parahippocampal
+        36: "FPN",  37: "FPN",   # parsopercularis
+        38: "FPN",  39: "FPN",   # parsorbitalis
+        40: "FPN",  41: "FPN",   # parstriangularis
+        42: "VIS",  43: "VIS",   # pericalcarine
+        44: "SMN",  45: "SMN",   # postcentral
+        46: "DMN",  47: "DMN",   # posteriorcingulate
+        48: "SMN",  49: "SMN",   # precentral
+        50: "DMN",  51: "DMN",   # precuneus
+        52: "DMN",  53: "DMN",   # rostralanteriorcingulate
+        54: "FPN",  55: "FPN",   # rostralmiddlefrontal
+        56: "FPN",  57: "FPN",   # superiorfrontal
+        58: "DAN",  59: "DAN",   # superiorparietal
+        60: "SMN",  61: "SMN",   # superiortemporal
+        62: "VAN",  63: "VAN",   # supramarginal
+        64: "DMN",  65: "DMN",   # temporalpole
+        66: "SMN",  67: "SMN",   # transversetemporal
+    }
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-        
-        ## find and read the deviation file
-        space = "source"
-        mode = "conn"
-        preproc_level = 2
-        data_mode = "test"
-        freq_band = "alpha_2"
-        conn_mode = "coh"
-        thr = 1.96
 
-        pal_1 = color_palette("Purples", n_colors=200)
-        pal_2 = color_palette("Reds", n_colors=200)
-        fig_kwargs = {
-                        "format": "pdf",
-                        "dpi": 300,
-                        "bbox_inches": "tight"
-                        }
-        
-        tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
-        models_dir = tinnorm_dir / "models"
-        saving_dir = tinnorm_dir / "plots" / "deviations"
-        saving_dir.mkdir(parents=True, exist_ok=True)
+    SAVING_DIR.mkdir(parents=True, exist_ok=True)
 
-        valid_conn_modes = ["conn", "global", "regional"]
-        if (mode in valid_conn_modes) != (conn_mode is not None):
-                raise ValueError("Invalid combination of mode and conn_mode.")
+    preproc_levels = [1, 2, 3]
+    spaces         = ["source"]
+    modalities     = ["power", "aperiodic", "regional", "global", "graph"]
+    conn_modes_all = ["pli", "plv", "coh"]
 
-        if mode in valid_conn_modes:
-                model_dir = models_dir / f"preproc_{preproc_level}" / space / f"{mode}_{conn_mode}"
-                regex = f"{freq_band}_{conn_mode}"      
-        else:
-                model_dir = models_dir / f"preproc_{preproc_level}" / space / mode
-                regex = f"{freq_band}" 
+    for preproc_level in preproc_levels:
+        for space in spaces:
+            for modality in modalities:
+                conn_loop = (conn_modes_all
+                             if modality in ["regional", "global", "graph"]
+                             else [None])
 
-        results_dir = model_dir / "full_model" / "results"
-        fname = results_dir / f"Z_{data_mode}.csv"
-                
-        df = pd.read_csv(fname)
-        df = df.filter(regex=regex)
-        
-        large_dev = (df > thr).sum(axis=0)
-        small_dev = (df < -thr).sum(axis=0)
-        total_dev = large_dev + small_dev
-        df_extreme = pd.DataFrame({
-                        "Large_Dev": large_dev,
-                        "Small_Dev": small_dev,
-                        "Total_Dev": total_dev
-                        }).T
+                for conn_mode in conn_loop:
+                    suffix    = f"{modality}_{conn_mode}" if conn_mode else modality
+                    model_dir = MODELS_DIR / f"preproc_{preproc_level}" / space / suffix
+                    test_path = model_dir / "full_model" / "results" / "Z_test.csv"
+                    loso_path = model_dir / "loso" / "loso_controls_Z.csv"
 
-        if mode == "conn":
-                plot_func = plot_brain_connectome
-                palette = pal_2
-                extra_id = conn_mode
-        else:
-                plot_func = plot_brain
-                palette = pal_1
-                extra_id = None
+                    if not test_path.exists():
+                        continue
 
-        save_plot(df.mean().values, "Avg_Dev", saving_dir, extra_id)
+                    print(f"\npreproc_{preproc_level} | {space} | {suffix}")
 
-        for dev_mode in df_extreme.index:  # iterate rows
-                save_plot(df_extreme.loc[dev_mode].values, dev_mode, saving_dir, extra_id)
-        
+                    # ── Load Z-scores ─────────────────────────────────────────
+                    df_tin = pd.read_csv(test_path).drop(
+                        columns=["observations", "subject_ids", "Unnamed: 0"],
+                        errors="ignore")
+                    groups: dict[str, pd.DataFrame] = {"tinnitus": df_tin}
+
+                    if loso_path.exists():
+                        df_ctrl = pd.read_csv(loso_path).drop(
+                            columns=["subject_id", "Unnamed: 0"], errors="ignore")
+                        groups["control"] = df_ctrl
+
+                    # ── Build list of (band_key, df_filtered) per group ───────
+                    n_rois = _get_n_labels()
+                    out_dir = SAVING_DIR / suffix
+                    out_dir.mkdir(exist_ok=True)
+
+                    if modality == "aperiodic":
+                        # No freq bands — plot exponent and offset separately
+                        band_specs = []
+                        for param in ["exponent", "offset"]:
+                            cols = [c for c in df_tin.columns
+                                    if c.endswith(f"_{param}")]
+                            if cols:
+                                band_specs.append(param)
+                        freq_bands_loop = band_specs if band_specs else []
+
+                    else:
+                        try:
+                            freq_bands_loop = _discover_freq_bands(test_path)
+                        except Exception as e:
+                            print(f"  freq-band discovery failed: {e}")
+                            continue
+
+                    if not freq_bands_loop:
+                        print(f"  no bands found — skipping")
+                        continue
+
+                    stem_base = f"preproc{preproc_level}_{space}_{suffix}"
+
+                    for freq_band in freq_bands_loop:
+
+                        # ── Per-group brain maps ──────────────────────────────
+                        roi_means: dict[str, np.ndarray] = {}
+
+                        for group_name, df_g in groups.items():
+
+                            if modality == "aperiodic":
+                                # freq_band is actually the param name here
+                                param = freq_band
+                                cols  = [c for c in df_g.columns
+                                         if c.endswith(f"_{param}")]
+                                if not cols:
+                                    continue
+                                df_band = df_g[cols].apply(
+                                    pd.to_numeric, errors="coerce"
+                                ).dropna(axis=1, how="all")
+                            else:
+                                df_band = _filter_band(
+                                    df_g, freq_band, conn_mode, modality)
+                                if df_band.empty:
+                                    continue
+
+                            try:
+                                mat = _to_roi_matrix(df_band, n_rois)
+                            except Exception as e:
+                                print(f"  _to_roi_matrix failed "
+                                      f"({group_name}, {freq_band}): {e}")
+                                continue
+
+                            mean_z  = mat.mean(axis=0)
+                            pct_dev = (np.abs(mat) > THR).mean(axis=0) * 100
+                            roi_means[group_name] = mean_z
+
+                            stem = f"{stem_base}_{freq_band}_{group_name}"
+                            for vals, label, tag in [
+                                (mean_z,  "Mean Z-score",  "meanZ"),
+                                (pct_dev, "% |Z| > 1.96", "pctDev"),
+                            ]:
+                                try:
+                                    fig = plot_brain(vals, PALETTE,
+                                                     cbar_label=label)
+                                    fpath = out_dir / f"{stem}_{tag}.pdf"
+                                    fig.savefig(fpath, **FIG_KW)
+                                    plt.close(fig)
+                                    print(f"  Saved → {fpath}")
+                                except Exception as e:
+                                    print(f"  brain plot failed "
+                                          f"({stem}_{tag}): {e}")
+
+                        # ── Difference map (tinnitus − control) ───────────────
+                        if ("tinnitus" in roi_means and "control" in roi_means
+                                and modality != "aperiodic"):
+                            diff  = roi_means["tinnitus"] - roi_means["control"]
+                            fstem = f"{stem_base}_{freq_band}_diff_meanZ"
+                            try:
+                                fig = plot_brain(diff, PALETTE_DIV,
+                                                 cbar_label="ΔMean Z (tin − ctrl)")
+                                fpath = out_dir / f"{fstem}.pdf"
+                                fig.savefig(fpath, **FIG_KW)
+                                plt.close(fig)
+                                print(f"  Saved → {fpath}")
+                            except Exception as e:
+                                print(f"  diff map failed ({freq_band}): {e}")
+
+
+# maybe kinda standardize and plot
