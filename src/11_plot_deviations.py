@@ -113,6 +113,34 @@ def _to_roi_matrix(df_band: pd.DataFrame, n_rois: int) -> np.ndarray:
 
 # ── Brain surface plot ────────────────────────────────────────────────────────
 
+def _robust_range(
+        vals: np.ndarray,
+        k: float = 1.5,
+        symmetric: bool = False,
+        vmin_floor: float | None = None,
+) -> tuple[float, float]:
+    """
+    Tukey IQR-based colormap range.
+
+    Uses Q1 − k*IQR … Q3 + k*IQR (default k=1.5, the standard box-plot fence).
+    Clamped to the actual data range so the range never exceeds the data.
+    With symmetric=True the limits are ±max(|lo|, |hi|) — for diverging maps.
+    vmin_floor forces vmin to be at least that value (e.g. 0 for pct_dev).
+    """
+    q1, q3 = np.percentile(vals, [25, 75])
+    iqr = q3 - q1
+    lo = max(float(q1 - k * iqr), float(vals.min()))
+    hi = min(float(q3 + k * iqr), float(vals.max()))
+    if vmin_floor is not None:
+        lo = max(lo, vmin_floor)
+    if symmetric:
+        bound = max(abs(lo), abs(hi))
+        lo, hi = -bound, bound
+    if lo == hi:
+        lo -= 1e-6; hi += 1e-6
+    return lo, hi
+
+
 def plot_brain(
         metric_vals,
         palette=None,
@@ -121,12 +149,18 @@ def plot_brain(
         subjects_dir=None,
         alpha: float = 0.8,
         cbar_label: str = "value",
+        symmetric: bool = False,
+        vmin_floor: float | None = None,
+        vmin: float | None = None,
+        vmax: float | None = None,
 ) -> plt.Figure:
     """
     Map per-ROI scalar values onto fsaverage (4 views: LH/RH × lateral/medial).
 
-    Colormap range is the 2nd–98th percentile so outlier ROIs don't compress
-    the scale. Values outside the range still receive the nearest palette colour.
+    Colormap range uses Tukey IQR fences (Q1−1.5·IQR … Q3+1.5·IQR) so single
+    outlier ROIs do not compress the colour scale.  Pass vmin/vmax to override.
+    symmetric=True mirrors the range around 0 (for diverging difference maps).
+    vmin_floor clamps vmin to a minimum (e.g. 0 for percent-deviation maps).
     """
     if palette is None:
         palette = PALETTE
@@ -141,8 +175,14 @@ def plot_brain(
         raise ValueError(
             f"Expected {len(labels)} values (n_labels), got {len(metric_vals)}.")
 
-    vmin = float(np.percentile(metric_vals, 2))
-    vmax = float(np.percentile(metric_vals, 98))
+    if vmin is None or vmax is None:
+        _lo, _hi = _robust_range(metric_vals, symmetric=symmetric,
+                                  vmin_floor=vmin_floor)
+        if vmin is None:
+            vmin = _lo
+        if vmax is None:
+            vmax = _hi
+
     if vmin == vmax:
         vmin -= 1e-6; vmax += 1e-6
     clipped = np.clip(metric_vals, vmin, vmax)
@@ -336,13 +376,13 @@ if __name__ == "__main__":
                             roi_means[group_name] = mean_z
 
                             stem = f"{stem_base}_{freq_band}_{group_name}"
-                            for vals, label, tag in [
-                                (mean_z,  "Mean Z-score",  "meanZ"),
-                                (pct_dev, "% |Z| > 1.96", "pctDev"),
+                            for vals, label, tag, kw in [
+                                (mean_z,  "Mean Z-score",  "meanZ",   {}),
+                                (pct_dev, "% |Z| > 1.96", "pctDev",  {"vmin_floor": 0.0}),
                             ]:
                                 try:
                                     fig = plot_brain(vals, PALETTE,
-                                                     cbar_label=label)
+                                                     cbar_label=label, **kw)
                                     fpath = out_dir / f"{stem}_{tag}.pdf"
                                     fig.savefig(fpath, **FIG_KW)
                                     plt.close(fig)
@@ -358,7 +398,8 @@ if __name__ == "__main__":
                             fstem = f"{stem_base}_{freq_band}_diff_meanZ"
                             try:
                                 fig = plot_brain(diff, PALETTE_DIV,
-                                                 cbar_label="ΔMean Z (tin − ctrl)")
+                                                 cbar_label="ΔMean Z (tin − ctrl)",
+                                                 symmetric=True)
                                 fpath = out_dir / f"{fstem}.pdf"
                                 fig.savefig(fpath, **FIG_KW)
                                 plt.close(fig)
