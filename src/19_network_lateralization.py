@@ -42,12 +42,12 @@ from statsmodels.stats.multitest import multipletests
 
 TINNORM_DIR = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
 RESULTS_DIR = TINNORM_DIR / "results"
-FIGURES_DIR = RESULTS_DIR / "figures"
+FIGURES_DIR = RESULTS_DIR / "figures" / "19_network_lateralization"
 TABLES_DIR  = RESULTS_DIR / "tables"
 
 PREPROC   = 2
 SPACE     = "source"
-CONN_MODE = "coh"
+CONN_MODE = "pli"   # best-performing connectivity measure
 
 CTRL_COLOR   = "#1f77b4"
 TIN_COLOR    = "#C99700"
@@ -167,9 +167,11 @@ def _compute_network_scores(df, roi_cols):
 
 def plot_network_radar(df_net, save_dir=FIGURES_DIR):
     """Radar plot: 6 spokes, two filled polygons (ctrl=blue, tin=gold)."""
-    nets  = NETWORKS
-    n     = len(nets)
-    angles = [pi / 2 - 2 * pi * i / n for i in range(n)]
+    nets = NETWORKS
+    n    = len(nets)
+    # Simple evenly-spaced angles; set_theta_offset / set_theta_direction
+    # handle the rotation so angles must NOT have the offset pre-baked in.
+    angles        = np.linspace(0, 2 * pi, n, endpoint=False).tolist()
     angles_closed = angles + [angles[0]]
 
     ctrl_mean = df_net[df_net["group"] == 0][nets].mean().values
@@ -189,7 +191,7 @@ def plot_network_radar(df_net, save_dir=FIGURES_DIR):
     ax.plot(angles_closed, tin_closed, color=TIN_COLOR, lw=2.5, label="Tinnitus")
     ax.fill(angles_closed, tin_closed, color=TIN_COLOR, alpha=0.2)
 
-    ax.set_xticks([pi / 2 - 2 * pi * i / n for i in range(n)])
+    ax.set_xticks(angles)
     ax.set_xticklabels(nets, fontsize=12, fontweight="bold")
     ax.tick_params(axis="x", pad=10)
     ax.spines["polar"].set_color("#cccccc")
