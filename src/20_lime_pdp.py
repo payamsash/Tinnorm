@@ -45,12 +45,12 @@ except ImportError:
 
 TINNORM_DIR  = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
 RESULTS_DIR  = TINNORM_DIR / "results"
-FIGURES_DIR  = RESULTS_DIR / "figures"
+FIGURES_DIR  = RESULTS_DIR / "figures" / "20_lime_pdp"
 TABLES_DIR   = RESULTS_DIR / "tables"
 
 SPACE        = "source"
 PREPROC      = 2
-CONN_MODE    = "coh"
+CONN_MODE    = "pli"   # best-performing connectivity measure
 RANDOM_STATE = 42
 N_TOP        = 10          # features shown in permutation importance
 N_PDP_FEAT   = 4           # features shown in PDP
