@@ -304,18 +304,26 @@ def run_nm_loso(
 
 if __name__ == "__main__":
 
-    # tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
-    tinnorm_dir = Path("/home/ubuntu/volume/Tinnorm")
+    tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
+    # tinnorm_dir = Path("/home/ubuntu/volume/Tinnorm")
     hm_dir = tinnorm_dir / "harmonized"
     models_dir = tinnorm_dir / "models"
     os.makedirs(models_dir, exist_ok=True)
 
-    preproc_levels = [1, 2, 3]
-    spaces = ["sensor", "source"]
-    # "graph" = graph-theory metrics (clustering, efficiency) from 07b_create_graph_metrics.py
-    modalities = ["aperiodic", "conn", "power", "global", "regional", "graph"][2:3]
-    conn_modes = ["pli", "plv", "coh"]
-    model_type = "blr"   # switch to "hbr" for priority-9 run
+    preproc_levels = [1, 3]   # preproc 2 already done; generate 1 and 3 for script 17
+    spaces = ["sensor", "source"][1:]
+    modalities = ["power"]    # power only — rerun with outscaler="standardize" to fix
+                              # numerical blow-up from large-magnitude preproc_1/3 features
+    conn_modes = ["pli"]
+    model_type = "blr"
+
+    # outscaler per modality: power features span ~10^9 for preproc_1 (vs ~10^5 for preproc_2)
+    # which causes BLR numerical instability on the test set.  "standardize" divides
+    # the response by its training-set std before fitting, giving identical Z-score
+    # semantics but stable arithmetic. PLI/connectivity models are fine with "none".
+    OUTSCALER = {"power": "standardize"}
+
+    import shutil
 
     for preproc_level in preproc_levels:
         for space in spaces:
@@ -325,41 +333,41 @@ if __name__ == "__main__":
                     if modality in ["conn", "global", "regional"]:
                         fname_feature = hm_dir / f"preproc_{preproc_level}" / space / f"{modality}_{conn_mode}_hm.csv"
                         model_dir = models_dir / f"preproc_{preproc_level}" / space / f"{modality}_{conn_mode}"
-                        if model_type == "hbr":
-                            model_dir = models_dir / f"preproc_{preproc_level}" / space / f"{modality}_{conn_mode}_hbr"
                     elif modality in ["aperiodic", "power"]:
                         fname_feature = hm_dir / f"preproc_{preproc_level}" / space / f"{modality}_hm.csv"
                         model_dir = models_dir / f"preproc_{preproc_level}" / space / f"{modality}"
-                        if model_type == "hbr":
-                            model_dir = models_dir / f"preproc_{preproc_level}" / space / f"{modality}_hbr"
                     elif modality == "graph":
                         fname_feature = hm_dir / f"preproc_{preproc_level}" / space / f"graph_{conn_mode}_hm.csv"
                         model_dir = models_dir / f"preproc_{preproc_level}" / space / f"graph_{conn_mode}"
-                        if model_type == "hbr":
-                            model_dir = models_dir / f"preproc_{preproc_level}" / space / f"graph_{conn_mode}_hbr"
                     else:
                         raise ValueError(f"Unknown modality: {modality!r}")
 
                     if not fname_feature.is_file():
+                        print(f"  Missing: {fname_feature.name} — skipping")
                         continue
 
+                    outscaler = OUTSCALER.get(modality, "none")
+
+                    # Force-remove stale model dir so the fixed outscaler is applied
+                    if model_dir.is_dir():
+                        print(f"  Removing stale model dir: {model_dir}")
+                        shutil.rmtree(model_dir)
+
                     # ── Step 1: fit full model + for_eval ─────────────────────
-                    if not model_dir.is_dir():
-                        run_nm(
-                            fname_feature,
-                            model_dir,
-                            outscaler="none",
-                            model_type=model_type,
-                            random_state=42
-                        )
+                    print(f"\npreproc_{preproc_level} | {space} | {modality} | outscaler={outscaler}")
+                    run_nm(
+                        fname_feature,
+                        model_dir,
+                        outscaler=outscaler,
+                        model_type=model_type,
+                        random_state=42
+                    )
 
                     # ── Step 2: LOSO to get unbiased control Z-scores ─────────
-                    loso_out = model_dir / "loso" / "loso_controls_Z.csv"
-                    if not loso_out.exists():
-                        run_nm_loso(
-                            fname_feature,
-                            model_dir,
-                            outscaler="none",
-                            model_type=model_type,
-                            random_state=42
-                        )
+                    run_nm_loso(
+                        fname_feature,
+                        model_dir,
+                        outscaler=outscaler,
+                        model_type=model_type,
+                        random_state=42
+                    )
