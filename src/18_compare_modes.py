@@ -67,12 +67,12 @@ except ImportError:
 
 TINNORM_DIR  = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
 RESULTS_DIR  = TINNORM_DIR / "results"
-FIGURES_DIR  = RESULTS_DIR / "figures"
+FIGURES_DIR  = RESULTS_DIR / "figures" / "18_mode_comparison"
 TABLES_DIR   = RESULTS_DIR / "tables"
 
 SPACE        = "source"
 PREPROC      = 2
-CONN_MODE    = "coh"
+CONN_MODE    = "pli"   # best-performing connectivity measure
 RANDOM_STATE = 42
 
 COLORS = {
@@ -88,10 +88,11 @@ COLORS = {
     # Modality ablation colours
     "power":         "#E8A838",
     "aperiodic":     "#5B7FA6",
-    "regional_coh":  "#6DB86B",
-    "global_coh":    "#D6655A",
-    "graph_coh":     "#9B59B6",
-    "diffusive_mm":  "#C99700",
+    "regional_pli":  "#6DB86B",
+    "global_pli":    "#D6655A",
+    "graph_pli":     "#9B59B6",
+    "diffusive_mm":       "#C99700",
+    "diffusive_mm_bands": "#FF5722",   # deep orange — band-resolved (best)
 }
 CHANCE_COLOR = "#7f8c8d"
 
@@ -105,9 +106,9 @@ def _load_data(data_mode: str, mode: str, preproc: int = PREPROC,
     hm_dir      = TINNORM_DIR / "harmonized"
     models_dir  = TINNORM_DIR / "models"
 
-    if mode in ("diffusive", "diffusive_mm"):
-        folder = mode
-        fname = TINNORM_DIR / folder / f"{SPACE}_preproc_{preproc}_{conn_mode}.csv"
+    if mode in ("diffusive", "diffusive_mm", "diffusive_mm_bands"):
+        suffix = "_bands" if mode == "diffusive_mm_bands" else ""
+        fname = TINNORM_DIR / "diffusive_mm" / f"{SPACE}_preproc_{preproc}_{conn_mode}{suffix}.csv"
         df = pd.read_csv(fname)
         df.rename(columns={"subject_ids": "subject_id"}, inplace=True)
         df = df.merge(df_master[["subject_id", "site"]], on="subject_id", how="left")
@@ -204,6 +205,13 @@ def run_loso(X, y, sites, clf_name: str, feat_sel: str = "none", n_features: int
 
 # ── Plotting helpers ──────────────────────────────────────────────────────────
 
+def _despine(ax, lw: float = 1.5):
+    ax.spines[["right", "top"]].set_visible(False)
+    ax.spines["left"].set_linewidth(lw)
+    ax.spines["bottom"].set_linewidth(lw)
+    ax.tick_params(width=lw, length=4)
+
+
 def _roc_pr_panel(series_list: list, title: str, fname_stem: str):
     """
     series_list : list of (label, color, y, y_prob, fold_true, fold_prob)
@@ -239,12 +247,24 @@ def _roc_pr_panel(series_list: list, title: str, fname_stem: str):
         ax.set(xlabel=xl, ylabel=yl)
         ax.set_title(f"{title}", style="italic", fontsize=10)
         ax.legend(frameon=False, fontsize="small")
-        ax.spines[["right", "top"]].set_visible(False)
+        _despine(ax)
 
     fpath = FIGURES_DIR / f"{fname_stem}.pdf"
     fig.savefig(fpath, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved → {fpath}")
+
+
+def _save_series(series_list: list, stem: str):
+    """Save y and y_prob per condition so script 24 can rebuild ROC/PR curves."""
+    out = {}
+    for label, color, y, y_prob, _, _ in series_list:
+        safe = label.replace(" ", "_").replace("/", "-")
+        out[f"{safe}__y"]      = np.asarray(y)
+        out[f"{safe}__y_prob"] = np.asarray(y_prob)
+        out[f"{safe}__color"]  = np.array([color], dtype=object)
+    np.savez(TABLES_DIR / f"{stem}_results.npz", **out)
+    print(f"  Results saved → {TABLES_DIR / f'{stem}_results.npz'}")
 
 
 def _metrics_bar(rows: list, group_col: str, fname_stem: str, title: str = ""):
@@ -288,9 +308,10 @@ def _metrics_bar(rows: list, group_col: str, fname_stem: str, title: str = ""):
 def compare_modes():
     print("\n── A. Mode comparison ──────────────────────────────")
     specs = [
-        ("Residual conn",  "residual",  "conn"),
-        ("Deviation conn", "deviation", "conn"),
-        ("Diffusive",      "diffusive", "diffusive_mm"),
+        ("Residual conn",       "residual",  "conn"),
+        ("Deviation conn",      "deviation", "conn"),
+        ("Diffusive (avg)",     "diffusive", "diffusive_mm"),
+        ("Diffusive (bands)",   "diffusive", "diffusive_mm_bands"),
     ]
     series, rows = [], []
     for label, data_mode, mode in specs:
@@ -300,8 +321,9 @@ def compare_modes():
             print(f"  Skipping {label}: {e}")
             continue
         print(f"  {label}:")
-        y_pred, y_prob, ft, fp = run_loso(X, y, sites, "RF")
-        color = COLORS.get(data_mode, "#888888")
+        clf = "LGBM" if (HAS_LGBM and mode == "diffusive_mm_bands") else "RF"
+        y_pred, y_prob, ft, fp = run_loso(X, y, sites, clf)
+        color = COLORS.get(mode, COLORS.get(data_mode, "#888888"))
         series.append((label, color, y, y_prob, ft, fp))
         rows.append({"mode": label,
                      "roc_auc": roc_auc_score(y, y_prob),
@@ -309,8 +331,9 @@ def compare_modes():
                      "f1": f1_score(y, y_pred, zero_division=0)})
 
     if series:
-        _roc_pr_panel(series, "Feature mode comparison (RF, LOSO)", "mode_roc_pr")
+        _roc_pr_panel(series, "Feature representation comparison (LOSO)", "mode_roc_pr")
         _metrics_bar(rows, "mode", "mode_auc_bar", "Mode comparison")
+        _save_series(series, "mode")
         df = pd.DataFrame(rows)
         df.to_csv(TABLES_DIR / "mode_comparison.csv", index=False)
         print(f"  Table → {TABLES_DIR / 'mode_comparison.csv'}")
@@ -321,7 +344,7 @@ def compare_modes():
 def compare_classifiers():
     print("\n── B. Classifier comparison ────────────────────────")
     try:
-        X, y, sites = _load_data("diffusive", "diffusive_mm")
+        X, y, sites = _load_data("diffusive", "diffusive_mm_bands")
     except FileNotFoundError as e:
         print(f"  Skipping: {e}")
         return
@@ -340,8 +363,9 @@ def compare_classifiers():
                      "balanced_accuracy": balanced_accuracy_score(y, y_pred),
                      "f1": f1_score(y, y_pred, zero_division=0)})
 
-    _roc_pr_panel(series, "Classifier comparison (diffusive, preproc 2, LOSO)", "clf_roc_pr")
+    _roc_pr_panel(series, "Classifier comparison (diffusive bands PLI, preproc 2, LOSO)", "clf_roc_pr")
     _metrics_bar(rows, "classifier", "clf_metrics_bar", "Classifier comparison")
+    _save_series(series, "clf")
     pd.DataFrame(rows).to_csv(TABLES_DIR / "clf_comparison.csv", index=False)
     print(f"  Table → {TABLES_DIR / 'clf_comparison.csv'}")
 
@@ -351,15 +375,15 @@ def compare_classifiers():
 def compare_feature_selection():
     print("\n── C. Feature-selection comparison ────────────────")
     try:
-        X, y, sites = _load_data("diffusive", "diffusive_mm")
+        X, y, sites = _load_data("diffusive", "diffusive_mm_bands")
     except FileNotFoundError as e:
         print(f"  Skipping: {e}")
         return
 
     configs = [
-        ("No selection",     "RF", "none",  X.shape[1]),
-        ("KBest-50",         "RF", "kbest",  50),
-        ("RFE-30",           "RF", "rfe",    30),
+        ("No selection", "RF", "none",  X.shape[1]),
+        ("KBest-50",     "RF", "kbest", 50),
+        ("RFE-30",       "RF", "rfe",   30),
     ]
 
     series, rows = [], []
@@ -372,7 +396,7 @@ def compare_feature_selection():
                      "balanced_accuracy": balanced_accuracy_score(y, y_pred),
                      "f1": f1_score(y, y_pred, zero_division=0)})
 
-    _roc_pr_panel(series, "Feature-selection comparison (RF, diffusive, LOSO)", "featsel_roc_pr")
+    _roc_pr_panel(series, "Feature-selection comparison (RF, diffusive bands PLI, LOSO)", "featsel_roc_pr")
     _metrics_bar(rows, "strategy", "featsel_metrics_bar", "Feature selection")
     pd.DataFrame(rows).to_csv(TABLES_DIR / "featsel_comparison.csv", index=False)
     print(f"  Table → {TABLES_DIR / 'featsel_comparison.csv'}")
@@ -391,12 +415,13 @@ def compare_modality_ablation():
     # Each entry: (label, data_mode, mode, conn_mode_override)
     # For diffusive_mm, data_mode is "diffusive"; for Z-score modalities, "deviation"
     modality_specs = [
-        ("power",        "deviation",  "power",       None),
-        ("aperiodic",    "deviation",  "aperiodic",   None),
-        ("regional_coh", "deviation",  "regional",    "coh"),
-        ("global_coh",   "deviation",  "global",      "coh"),
-        ("graph_coh",    "deviation",  "graph",       "coh"),
-        ("diffusive_mm", "diffusive",  "diffusive_mm", "coh"),
+        ("power",             "deviation", "power",             None),
+        ("aperiodic",         "deviation", "aperiodic",         None),
+        ("regional_pli",      "deviation", "regional",          "pli"),
+        ("global_pli",        "deviation", "global",            "pli"),
+        ("graph_pli",         "deviation", "graph",             "pli"),
+        ("diffusive_mm",      "diffusive", "diffusive_mm",      "pli"),
+        ("diffusive_mm_bands","diffusive", "diffusive_mm_bands","pli"),
     ]
 
     series, rows = [], []
@@ -412,8 +437,9 @@ def compare_modality_ablation():
             continue
 
         print(f"  {label}:")
+        clf = "LGBM" if (HAS_LGBM and mode == "diffusive_mm_bands") else "RF"
         try:
-            y_pred, y_prob, ft, fp = run_loso(X, y, sites, "RF")
+            y_pred, y_prob, ft, fp = run_loso(X, y, sites, clf)
         except Exception as e:
             print(f"    LOSO failed: {e}")
             continue
@@ -432,11 +458,12 @@ def compare_modality_ablation():
         return
 
     _roc_pr_panel(series,
-                  "Modality ablation (RF, preproc 2, LOSO)",
+                  "EEG modality ablation (RF, preproc 2, LOSO)",
                   "modality_ablation_roc_pr")
     _metrics_bar(rows, "modality",
                  "modality_ablation_metrics",
                  "Modality ablation")
+    _save_series(series, "modality_ablation")
     df_abl = pd.DataFrame(rows)
     df_abl.to_csv(TABLES_DIR / "modality_ablation.csv", index=False)
     print(f"  Table → {TABLES_DIR / 'modality_ablation.csv'}")
