@@ -25,6 +25,7 @@ import seaborn as sns
 
 from sklearn.model_selection import StratifiedGroupKFold, LeaveOneGroupOut
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import (
@@ -51,18 +52,18 @@ except ImportError:
 
 tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
 RESULTS_DIR = tinnorm_dir / "results"
-FIGURES_DIR = RESULTS_DIR / "figures"
+FIGURES_DIR = RESULTS_DIR / "figures" / "16_shap"
 read_kwargs = {
     "data_mode": "deviation",
-    "mode": "diffusive_mm",     # actual folder: tinnorm_dir/diffusive_mm/
+    "mode": "diffusive_mm_bands",  # best AUC (0.82 with PLI); use "diffusive_mm" for 68-ROI avg
     "space": "source",
     "freq_band": None,
     "preproc_level": 2,
-    "conn_mode": "coh",
+    "conn_mode": "pli",            # J_bands_pli_lgbm is the top-performing scenario
     "thi_threshold": None,
 }
 
-ml_model      = "RF"   # "RF" or "LGBM"
+ml_model      = "LGBM"   # "RF" or "LGBM"
 folding_mode  = "loso" # "loso" or "sgkf5"
 n_jobs        = -1
 random_state  = 42
@@ -93,9 +94,10 @@ def _read_the_file(
 
     subject_ids = None   # populated inside each branch before subject_id is dropped
 
-    if mode in ("diffusive", "diffusive_mm"):
-        folder = mode
-        fname = tinnorm_dir / folder / f"{space}_preproc_{preproc_level}_{conn_mode}.csv"
+    if mode in ("diffusive", "diffusive_mm", "diffusive_mm_bands"):
+        suffix = "_bands" if mode == "diffusive_mm_bands" else ""
+        folder = "diffusive_mm" if mode != "diffusive" else mode
+        fname = tinnorm_dir / folder / f"{space}_preproc_{preproc_level}_{conn_mode}{suffix}.csv"
         df = pd.read_csv(fname)
         df.rename(columns={"subject_ids": "subject_id"}, inplace=True)
         df = df.merge(df_master[["subject_id", "site"]], on="subject_id", how="left")
@@ -109,7 +111,9 @@ def _read_the_file(
             df = df.merge(df_master[["subject_id"] + _meta_cols], on="subject_id", how="left")
 
         subject_ids = df["subject_id"].to_numpy() if "subject_id" in df.columns else None
-        df.drop(columns=["Unnamed: 0", "subject_id", "thi_score"], inplace=True, errors="ignore")
+        drop_cols = ["Unnamed: 0", "subject_id", "thi_score", "THI",
+                     "PTA4_mean", "PTA4_HF", "age", "sex"]
+        df.drop(columns=drop_cols, inplace=True, errors="ignore")
 
     elif data_mode == "residual":
         mode_prefix = f"_{conn_mode}" if mode in ("conn", "global", "regional") else ""
@@ -162,7 +166,7 @@ def _read_the_file(
     if subject_ids is None:
         subject_ids = np.arange(len(df))
 
-    y     = df["group"].to_numpy()
+    y     = df["group"].to_numpy(dtype=int)
     sites = df["SITE"].to_numpy()
 
     print(f"\nSubject counts:\n{df['group'].value_counts()}")
@@ -200,7 +204,11 @@ def _make_model(ml_model, random_state, n_jobs):
             random_state=random_state,
             n_jobs=n_jobs,
         )
-    return Pipeline([("scaler", StandardScaler()), ("clf", clf)])
+    return Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("scaler", StandardScaler()),
+        ("clf", clf),
+    ])
 
 
 # ── SHAP inside LOSO CV ───────────────────────────────────────────────────────
@@ -250,11 +258,14 @@ def compute_shap_loso(
         y_prob[test_idx] = pipe.predict_proba(X_te)[:, 1]
         fold_membership[test_idx] = fold_i
 
-        # SHAP on held-out test fold, using the scaled features the clf sees
-        clf    = pipe.named_steps["clf"]
-        scaler = pipe.named_steps["scaler"]
-        X_te_scaled = pd.DataFrame(scaler.transform(X_te), columns=X.columns)
-        X_tr_scaled = pd.DataFrame(scaler.transform(X_tr), columns=X.columns)
+        # SHAP on held-out test fold, using the imputed+scaled features the clf sees
+        clf     = pipe.named_steps["clf"]
+        imputer = pipe.named_steps["imputer"]
+        scaler  = pipe.named_steps["scaler"]
+        X_te_imp = imputer.transform(X_te)
+        X_tr_imp = imputer.transform(X_tr)
+        X_te_scaled = pd.DataFrame(scaler.transform(X_te_imp), columns=X.columns)
+        X_tr_scaled = pd.DataFrame(scaler.transform(X_tr_imp), columns=X.columns)
 
         explainer = shap.TreeExplainer(
             clf,
@@ -317,10 +328,20 @@ def plot_shap_summary(shap_vals, X, y, top_k=10, scatter_k=3, save_dir: Path = F
         data=X.values,
         feature_names=list(X.columns),
     )
-    cmap1 = sns.color_palette("ch:s=-.2,r=.6", as_cmap=True)
-    fig_sum, ax_sum = plt.subplots(figsize=(7, 5), constrained_layout=True)
-    shap.summary_plot(expl, X, max_display=top_k, cmap=cmap1, alpha=0.3,
+    # Blue (low feature value) → white → red (high): clean, perceptually balanced
+    cmap1 = LinearSegmentedColormap.from_list(
+        "shap_feat", ["#2471A3", "#D6EAF8", "#F9F9F9", "#FADBD8", "#C0392B"]
+    )
+    # Do NOT use constrained_layout — shap.summary_plot calls tight_layout internally
+    fig_sum, _ = plt.subplots(figsize=(8, 6.5))
+    shap.summary_plot(expl, X, max_display=top_k, cmap=cmap1, alpha=0.65,
                       show=False, plot_size=None)
+    # Thicken axes after SHAP renders (shap takes over plt.gca())
+    ax = plt.gca()
+    ax.spines[["right", "top"]].set_visible(False)
+    ax.spines["left"].set_linewidth(1.5)
+    ax.spines["bottom"].set_linewidth(1.5)
+    ax.tick_params(width=1.5, length=4)
     fpath = save_dir / "shap_summary.pdf"
     plt.savefig(fpath, dpi=150, bbox_inches="tight")
     plt.close("all")
@@ -583,22 +604,53 @@ def plot_shap_fold_stability(shap_vals, X, sites, fold_membership,
             rows.append({"feature": feat, "mean_abs_shap": fold_shap[idx], "site": site_label})
     df_stab = pd.DataFrame(rows)
 
-    fig, ax = plt.subplots(figsize=(7, 6), constrained_layout=True)
+    unique_sites  = sorted(df_stab["site"].unique())
+    # Perceptually uniform, saturated palette — one rich hue per site
+    site_palette  = dict(zip(unique_sites,
+                             sns.color_palette("husl", len(unique_sites))))
+    box_edge = "#2C3E50"   # dark slate — clean neutral against coloured dots
+
+    fig, ax = plt.subplots(figsize=(7.5, 6.5), constrained_layout=True)
+
+    # Hollow box: fill=False (seaborn ≥ 0.12); whiskers and median in dark slate
     sns.boxplot(data=df_stab, x="mean_abs_shap", y="feature",
-                order=top_names, color="#9B59B6", showfliers=False,
-                medianprops={"color": "white", "linewidth": 2},
-                width=0.6, linewidth=1.5, ax=ax)
+                order=top_names,
+                fill=False,
+                color=box_edge,
+                linewidth=1.6,
+                fliersize=0,
+                width=0.55,
+                medianprops={"color": box_edge, "linewidth": 2.5,
+                             "solid_capstyle": "round"},
+                ax=ax)
+
+    # Coloured dots per site — slightly larger, white halo for readability
     sns.stripplot(data=df_stab, x="mean_abs_shap", y="feature",
-                  order=top_names, hue="site", palette="tab10",
-                  alpha=0.8, size=6, ax=ax)
-    ax.set_xlabel("Mean |SHAP| (tinnitus class)", fontsize=10)
-    ax.set_ylabel("")
+                  order=top_names, hue="site",
+                  palette=site_palette,
+                  alpha=0.88, size=7.5, jitter=0.25,
+                  linewidth=0.5, edgecolor="white",
+                  ax=ax)
+
+    # Subtle vertical grid behind everything
+    ax.set_axisbelow(True)
+    ax.grid(axis="x", color="#DDDDDD", linewidth=0.8, zorder=0)
+
+    # Thicker axes
+    ax.spines[["right", "top"]].set_visible(False)
+    ax.spines["left"].set_linewidth(1.5)
+    ax.spines["bottom"].set_linewidth(1.5)
+    ax.tick_params(width=1.5, length=4)
+
+    ax.set_xlabel("Mean |SHAP| (tinnitus class)", fontsize=11)
+    ax.set_ylabel("", fontsize=11)
     ax.set_title(f"Feature importance stability across LOSO folds\n"
-                 f"(top {top_k} features, each dot = one held-out site)",
+                 f"(top {top_k} features — each dot = one held-out site)",
                  style="italic", fontsize=10)
     ax.legend(title="Held-out site", frameon=False, fontsize="x-small",
+              title_fontsize="x-small",
               bbox_to_anchor=(1.01, 1), loc="upper left")
-    ax.spines[["right", "top"]].set_visible(False)
+
     fpath = save_dir / "shap_fold_stability.pdf"
     fig.savefig(fpath, dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -916,6 +968,17 @@ if __name__ == "__main__":
 
     df_metrics = pd.DataFrame([metrics])
     df_metrics.to_csv(TABLES_DIR / "shap_loso_metrics.csv", index=False)
+
+    # Save SHAP arrays for downstream analysis (scripts 23 & 24 load these)
+    np.save(TABLES_DIR / "shap_values.npy", shap_vals)
+    np.save(TABLES_DIR / "shap_feature_names.npy", np.array(list(X.columns), dtype=object))
+    np.save(TABLES_DIR / "shap_fold_membership.npy", fold_membership)
+    np.save(TABLES_DIR / "shap_sites.npy", np.array(sites, dtype=object))
+    mean_abs_shap = np.abs(shap_vals[:, :, 1]).mean(axis=0)
+    pd.DataFrame({"feature": list(X.columns), "mean_abs_shap": mean_abs_shap}).sort_values(
+        "mean_abs_shap", ascending=False
+    ).reset_index(drop=True).to_csv(TABLES_DIR / "shap_mean_abs.csv", index=False)
+    print(f"  Saved SHAP arrays + fold metadata → {TABLES_DIR}")
 
     # ── Core SHAP plots ────────────────────────────────────────────────────
     print("\n── Core SHAP plots ──")
