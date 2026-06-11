@@ -1,14 +1,26 @@
 """
 Classification pipeline: tinnitus vs. controls.
 
-Reads pre-computed features (harmonized HM, normative Z-scores, or multi-modal
-Mahalanobis diffusion scores) and runs site-stratified cross-validation with
-optional Optuna hyperparameter tuning.
+Reads pre-computed features (harmonized residuals, normative Z-scores, or
+multi-modal Mahalanobis diffusion scores) and runs site-stratified LOSO CV
+with optional Optuna tuning and permutation tests.
 
-Supported feature modes: power, aperiodic, regional, global, graph, diffusive_mm.
-Supported classifiers: RF, SVM, LGBM (requires lightgbm).
+Feature modes
+-------------
+diffusive_mm        68 ROIs, band-averaged Mahalanobis distance (default)
+diffusive_mm_bands  ~680 ROI×band Mahalanobis distances (full resolution)
+power / aperiodic   normative Z-score features (deviation mode)
+regional / global   connectivity Z-scores (deviation mode)
+graph               graph-topology Z-scores (deviation mode)
+residual            harmonized HM residuals (residual mode)
+
+Classifiers: RF, SVM, LGBM (requires lightgbm).
+Tuning:      Optuna Bayesian HPO (requires optuna).
+
+Run from src/:  python 13_compare_clfs.py
 """
 
+import json
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -27,6 +39,7 @@ from sklearn.svm import SVC
 from sklearn.feature_selection import RFE, SelectKBest, SelectFromModel, f_classif
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedGroupKFold, StratifiedKFold, cross_val_score
+from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
@@ -70,6 +83,8 @@ class ClassificationResult:
     p1_folds: Optional[list] = None
     y2_folds: Optional[list] = None
     p2_folds: Optional[list] = None
+    per_fold_auc: Optional[dict] = None   # site → AUC on held-out fold
+    sites: Optional[np.ndarray] = None
 
 
 # ---------------------------------------------------------------------------
@@ -88,14 +103,17 @@ def _read_the_file(
 ):
     hm_dir = tinnorm_dir / "harmonized"
     models_dir = tinnorm_dir / "models"
-    df_master = pd.read_csv("../material/master_clean.csv")
+    # df_master = pd.read_csv("../material/master_clean.csv")
+    df_master = pd.read_csv(tinnorm_dir / "master_clean.csv")
 
     # Support both old (thi_score) and new (THI) column naming
     _thi_col = "THI" if "THI" in df_master.columns else "thi_score"
 
-    # ── diffusive / diffusive_mm ─────────────────────────────────────────
-    if mode in ["diffusive", "diffusive_mm"]:
-        fname = tinnorm_dir / mode / f"{space}_preproc_{preproc_level}_{conn_mode}.csv"
+    # ── diffusive_mm / diffusive_mm_bands ───────────────────────────────
+    if mode in ["diffusive", "diffusive_mm", "diffusive_mm_bands"]:
+        suffix = "_bands" if mode == "diffusive_mm_bands" else ""
+        folder = "diffusive_mm" if mode != "diffusive" else mode
+        fname = tinnorm_dir / folder / f"{space}_preproc_{preproc_level}_{conn_mode}{suffix}.csv"
         df = pd.read_csv(fname)
         df.rename(columns={"subject_ids": "subject_id"}, inplace=True)
         df = df.merge(df_master[["subject_id", "site"]], on="subject_id", how="left")
@@ -158,7 +176,7 @@ def _read_the_file(
     else:
         raise ValueError(f"Unknown data_mode: '{data_mode}'")
 
-    y = df["group"].to_numpy()
+    y = df["group"].to_numpy(dtype=int)
     sites = df["SITE"].to_numpy()
 
     print(f"\n  Group counts: {dict(pd.Series(y).value_counts().sort_index())}")
@@ -190,7 +208,10 @@ def _build_pipeline(
         **model_params,
 ):
     """Return a sklearn Pipeline.  Every label-touching step lives inside."""
-    steps = [("scaler", StandardScaler())]
+    steps = [
+        ("imputer", SimpleImputer(strategy="median")),
+        ("scaler", StandardScaler()),
+    ]
 
     if feature_selection == "kbest":
         steps.append(("selector", SelectKBest(f_classif, k=n_features)))
@@ -325,8 +346,20 @@ def metrics_to_dataframe(model_name, y, y_pred, y_prob=None):
     })
 
 
+def _per_fold_auc(y, y_prob, sites):
+    """AUC per held-out site, computed from the assembled LOSO predictions."""
+    result = {}
+    for site in np.unique(sites):
+        mask = sites == site
+        if len(np.unique(y[mask])) > 1:
+            result[str(site)] = float(roc_auc_score(y[mask], y_prob[mask]))
+        else:
+            result[str(site)] = float("nan")
+    return result
+
+
 # ---------------------------------------------------------------------------
-# Cross-validation  (P1 + P2: scaler inside fold, P4: optional Optuna)
+# Cross-validation
 # ---------------------------------------------------------------------------
 
 def run_cv(
@@ -397,6 +430,7 @@ def _run_permutation(
     y_pred, y_prob = run_cv(X, y, sites, ml_model, n_jobs, random_state,
                              feature_selection, n_features, tune, n_trials)
     df_metric = metrics_to_dataframe(f"{ml_model}_real", y, y_pred, y_prob)
+    fold_auc = _per_fold_auc(y, y_prob, sites)
 
     rng = np.random.default_rng(random_state)
     print("Running permutation tests…")
@@ -409,7 +443,7 @@ def _run_permutation(
         df_p = metrics_to_dataframe(f"{ml_model}_perm_{i+1}", y_perm, y_pred_p, y_prob_p)
         df_metric = pd.concat([df_metric, df_p], ignore_index=True)
 
-    return df_metric, y_pred, y_prob
+    return df_metric, y_pred, y_prob, fold_auc
 
 
 # ---------------------------------------------------------------------------
@@ -459,21 +493,34 @@ def _run_comparison(
         X_2, y, sites, ml_model, n_jobs, random_state, feature_selection, n_features
     )
 
-    return df_metric, y, y_prob_1, y_prob_2, delta_null, real_delta, p_value, \
-           y1_folds, p1_folds, y2_folds, p2_folds
+    fold_auc = {
+        "residual":  _per_fold_auc(y, y_prob_1, sites),
+        "deviation": _per_fold_auc(y, y_prob_2, sites),
+    }
+
+    return (df_metric, y, y_prob_1, y_prob_2, delta_null, real_delta, p_value,
+            y1_folds, p1_folds, y2_folds, p2_folds, fold_auc)
 
 
 # ---------------------------------------------------------------------------
 # Save results
 # ---------------------------------------------------------------------------
 
-def save_clf_result(res, clfs_dir, run_mode):
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    saving_dir = clfs_dir / run_mode / timestamp
-    saving_dir.mkdir(parents=True, exist_ok=True)
-    res.df_metric.to_csv(saving_dir / "metrics.csv", index=False)
+def save_clf_result(res, save_dir: Path, run_mode: str, params: dict):
+    save_dir.mkdir(parents=True, exist_ok=True)
+    res.df_metric.to_csv(save_dir / "metrics.csv", index=False)
 
-    if run_mode == "permutation":
+    with open(save_dir / "params.json", "w") as f:
+        json.dump({k: str(v) for k, v in params.items()}, f, indent=2)
+
+    if res.per_fold_auc is not None:
+        with open(save_dir / "per_fold_auc.json", "w") as f:
+            json.dump(res.per_fold_auc, f, indent=2)
+
+    if res.sites is not None:
+        np.save(save_dir / "sites.npy", res.sites)
+
+    if run_mode in ("permutation", "cv_only"):
         arrays = {"y": res.y, "y_pred": res.y_pred, "y_prob": res.y_prob_1}
     else:
         arrays = {
@@ -488,12 +535,12 @@ def save_clf_result(res, clfs_dir, run_mode):
         if arr is None:
             continue
         if name.endswith("folds"):
-            with open(saving_dir / f"{name}.pkl", "wb") as f:
+            with open(save_dir / f"{name}.pkl", "wb") as f:
                 pickle.dump(arr, f)
         else:
-            np.save(saving_dir / f"{name}.npy", arr, allow_pickle=True)
+            np.save(save_dir / f"{name}.npy", arr, allow_pickle=True)
 
-    print(f"Results saved → {saving_dir}")
+    print(f"  Saved → {save_dir}")
 
 
 # ---------------------------------------------------------------------------
@@ -514,7 +561,7 @@ def classify(
         n_jobs,
         feature_selection=None,
         n_features=50,
-        run_permutation=False,
+        run_permutation=True,
         n_permutations=100,
         run_comparison=False,
         tune_hyperparams=False,
@@ -522,6 +569,9 @@ def classify(
         thi_threshold=None,
         random_state=42,
 ):
+    if run_permutation and run_comparison:
+        raise ValueError("run_permutation and run_comparison cannot both be True.")
+
     params = {k: v for k, v in locals().items() if k != "tinnorm_dir"}
 
     X, y, sites = _read_the_file(
@@ -529,7 +579,6 @@ def classify(
         preproc_level, conn_mode, thi_threshold,
     )
 
-    # Correlation filter: label-independent, acceptable outside CV
     if high_corr_drop:
         corr_matrix = X.corr().abs()
         upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
@@ -537,45 +586,56 @@ def classify(
         X.drop(columns=to_drop, inplace=True)
         print(f"  Correlation filter: dropped {len(to_drop)}, remaining {X.shape[1]}")
 
-    print(f"\n  Feature matrix: {X.shape[0]} subjects × {X.shape[1]} features")
+    n_feat = min(n_features, X.shape[1]) if feature_selection is not None else X.shape[1]
+    print(f"\n  Feature matrix: {X.shape[0]} subjects × {X.shape[1]} features"
+          + (f"  (selection → {n_feat})" if feature_selection else ""))
 
-    if run_permutation == run_comparison:
-        raise ValueError("Exactly one of run_permutation or run_comparison must be True.")
+    def _stamp_params(df):
+        for k, v in params.items():
+            df[k] = [v] * len(df)
+        df["actual_n_features"] = X.shape[1]
 
+    # ── CV only ───────────────────────────────────────────────────────────
+    if not run_permutation and not run_comparison:
+        y_pred, y_prob = run_cv(X, y, sites, ml_model, n_jobs, random_state,
+                                 feature_selection, n_feat, tune_hyperparams, n_trials)
+        df_metric = metrics_to_dataframe(f"{ml_model}_real", y, y_pred, y_prob)
+        fold_auc = _per_fold_auc(y, y_prob, sites)
+        _stamp_params(df_metric)
+        return ClassificationResult(df_metric=df_metric, y=y, y_pred=y_pred,
+                                    y_prob_1=y_prob, per_fold_auc=fold_auc, sites=sites)
+
+    # ── Permutation test ──────────────────────────────────────────────────
     if run_permutation:
-        df_metric, y_pred, y_prob = _run_permutation(
+        df_metric, y_pred, y_prob, fold_auc = _run_permutation(
             X, y, sites, ml_model, n_jobs, random_state,
-            feature_selection, min(n_features, X.shape[1]),
-            tune_hyperparams, n_trials, n_permutations,
+            feature_selection, n_feat, tune_hyperparams, n_trials, n_permutations,
         )
-        if not df_metric.empty:
-            for k, v in params.items():
-                df_metric[k] = [v] * len(df_metric)
-        return ClassificationResult(df_metric=df_metric, y=y, y_pred=y_pred, y_prob_1=y_prob)
+        _stamp_params(df_metric)
+        return ClassificationResult(df_metric=df_metric, y=y, y_pred=y_pred,
+                                    y_prob_1=y_prob, per_fold_auc=fold_auc, sites=sites)
 
-    if run_comparison:
-        X_2, y_2, sites_2 = _read_the_file(
-            tinnorm_dir, "deviation", mode, space, freq_band,
-            preproc_level, conn_mode, thi_threshold,
-        )
-        df_metric, y, y_prob_1, y_prob_2, delta_null, real_delta, p_value, \
-            y1_folds, p1_folds, y2_folds, p2_folds = _run_comparison(
-                X, X_2, y, y_2, sites, sites_2,
-                ml_model, n_jobs, random_state,
-                feature_selection, min(n_features, X.shape[1]),
-                tune_hyperparams, n_trials, n_permutations,
-            )
-        if not df_metric.empty:
-            for k, v in params.items():
-                df_metric[k] = [v] * len(df_metric)
-            df_metric.at[1, "data_mode"] = "deviation"
-        return ClassificationResult(
-            df_metric=df_metric, y=y,
-            y_prob_1=y_prob_1, y_prob_2=y_prob_2,
-            delta_null=delta_null, real_delta=real_delta, p_value=p_value,
-            y1_folds=y1_folds, p1_folds=p1_folds,
-            y2_folds=y2_folds, p2_folds=p2_folds,
-        )
+    # ── Comparison (residual vs. deviation) ───────────────────────────────
+    X_2, y_2, sites_2 = _read_the_file(
+        tinnorm_dir, "deviation", mode, space, freq_band,
+        preproc_level, conn_mode, thi_threshold,
+    )
+    (df_metric, y, y_prob_1, y_prob_2, delta_null, real_delta, p_value,
+     y1_folds, p1_folds, y2_folds, p2_folds, fold_auc) = _run_comparison(
+        X, X_2, y, y_2, sites, sites_2,
+        ml_model, n_jobs, random_state,
+        feature_selection, n_feat, tune_hyperparams, n_trials, n_permutations,
+    )
+    _stamp_params(df_metric)
+    df_metric.at[1, "data_mode"] = "deviation"
+    return ClassificationResult(
+        df_metric=df_metric, y=y,
+        y_prob_1=y_prob_1, y_prob_2=y_prob_2,
+        delta_null=delta_null, real_delta=real_delta, p_value=p_value,
+        y1_folds=y1_folds, p1_folds=p1_folds,
+        y2_folds=y2_folds, p2_folds=p2_folds,
+        per_fold_auc=fold_auc, sites=sites,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -584,57 +644,230 @@ def classify(
 
 if __name__ == "__main__":
 
-    tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
-    clfs_dir = tinnorm_dir / "clfs"
+    # ═══════════════════════════════════════════════════════════════════════
+    # CONFIGURATION — edit before running on VM
+    # ═══════════════════════════════════════════════════════════════════════
+    # TINNORM_DIR     = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
+    TINNORM_DIR   = Path("/home/ubuntu/volume/Tinnorm")
 
+    RUN_PERMUTATION = True   # False = quick dry-run (no null distribution)
+    N_PERMUTATIONS  = 100
+    N_TRIALS_OPTUNA = 30     # Bayesian HPO trials per outer fold
+    N_JOBS          = -1     # -1 = all cores; set e.g. 8 on shared VM nodes
+
+    # Leave empty to run every scenario; or list labels to run a subset:
+    # SCENARIOS_TO_RUN = ["A_preproc2_lgbm", "B_preproc2_rf"]
+    SCENARIOS_TO_RUN: list = []
+
+    clfs_dir = TINNORM_DIR / "clfs"
+
+    # ── Base configuration (overridden per scenario) ──────────────────────
     base_kwargs = dict(
         space="source",
-        data_mode="deviation",   # ignored when mode is diffusive_mm; used for graph/other modes
-        mode="diffusive_mm",
+        data_mode="deviation",      # ignored when mode=diffusive_mm*
+        mode="diffusive_mm",        # 68 ROI band-averaged Mahalanobis features
         conn_mode="coh",
         freq_band=None,
         high_corr_drop=False,
         corr_thr=0.95,
-        n_jobs=-1,
-        feature_selection=None,
-        n_features=50,
-        run_permutation=True,
-        n_permutations=100,
+        n_jobs=N_JOBS,
+        feature_selection=None,     # None = use ALL features (no selection)
+        n_features=50,              # only used when feature_selection is set
+        run_permutation=RUN_PERMUTATION,
+        n_permutations=N_PERMUTATIONS,
         run_comparison=False,
         tune_hyperparams=False,
-        n_trials=30,
+        n_trials=N_TRIALS_OPTUNA,
         thi_threshold=None,
         random_state=42,
     )
 
-    # ── Scenarios ────────────────────────────────────────────────────────
-    # Each entry: (scenario_label, kwargs_overrides)
+    # ── Scenarios ─────────────────────────────────────────────────────────
     scenarios = [
-        # Preprocessing sweep
-        ("preproc1_lgbm_tuned",   dict(preproc_level=1, ml_model="LGBM", tune_hyperparams=True, n_trials=30)),
-        ("preproc2_lgbm_tuned",   dict(preproc_level=2, ml_model="LGBM", tune_hyperparams=True, n_trials=30)),
-        ("preproc3_lgbm_tuned",   dict(preproc_level=3, ml_model="LGBM", tune_hyperparams=True, n_trials=30)),
-        # Classifier comparison (preproc_2)
-        ("preproc2_rf",           dict(preproc_level=2, ml_model="RF")),
-        ("preproc2_svm",          dict(preproc_level=2, ml_model="SVM")),
-        # Feature selection inside CV
-        ("preproc2_lgbm_kbest50", dict(preproc_level=2, ml_model="LGBM", feature_selection="kbest",  n_features=50)),
-        ("preproc2_rf_rfe30",     dict(preproc_level=2, ml_model="RF",   feature_selection="rfe",    n_features=30)),
-        # THI severity sweep
-        ("thi25_preproc2_lgbm",   dict(preproc_level=2, ml_model="LGBM", thi_threshold=25, tune_hyperparams=True)),
-        ("thi36_preproc2_lgbm",   dict(preproc_level=2, ml_model="LGBM", thi_threshold=36, tune_hyperparams=True)),
-        # Graph topology Z-scores — requires 08 to have been run for graph modality
-        ("preproc2_lgbm_graph",   dict(preproc_level=2, ml_model="LGBM", mode="graph",
-                                       data_mode="deviation", conn_mode="coh")),
-    ]
+
+        # ── A: Preprocessing levels (LGBM, diffusive_mm, coh) ─────────────
+        ("A_preproc1_lgbm",           dict(preproc_level=1, ml_model="LGBM")),
+        ("A_preproc2_lgbm",           dict(preproc_level=2, ml_model="LGBM")),  # baseline
+        ("A_preproc3_lgbm",           dict(preproc_level=3, ml_model="LGBM")),
+
+        # ── B: Classifier comparison (preproc=2, diffusive_mm, coh) ──────
+        ("B_preproc2_rf",             dict(preproc_level=2, ml_model="RF")),
+        ("B_preproc2_svm",            dict(preproc_level=2, ml_model="SVM")),
+
+        # ── C: Connectivity measure (preproc=2, LGBM, diffusive_mm) ──────
+        ("C_preproc2_lgbm_pli",       dict(preproc_level=2, ml_model="LGBM", conn_mode="pli")),
+        ("C_preproc2_lgbm_plv",       dict(preproc_level=2, ml_model="LGBM", conn_mode="plv")),
+
+        # ── D: Feature dimensionality — 68 avg vs ~680 band-resolved ─────
+        #    Requires 09_multimodal_diffusion.py to have been re-run (saves _bands.csv)
+        ("D_preproc2_lgbm_bands",     dict(preproc_level=2, ml_model="LGBM",
+                                           mode="diffusive_mm_bands")),
+        ("D_preproc2_lgbm_bands_k50", dict(preproc_level=2, ml_model="LGBM",
+                                           mode="diffusive_mm_bands",
+                                           feature_selection="kbest", n_features=50)),
+        ("D_preproc2_rf_bands",       dict(preproc_level=2, ml_model="RF",
+                                           mode="diffusive_mm_bands")),
+
+        # ── E: Feature selection (preproc=2, diffusive_mm) ────────────────
+        ("E_preproc2_lgbm_kbest50",   dict(preproc_level=2, ml_model="LGBM",
+                                           feature_selection="kbest", n_features=50)),
+        ("E_preproc2_rf_rfe30",       dict(preproc_level=2, ml_model="RF",
+                                           feature_selection="rfe",   n_features=30)),
+        ("E_preproc2_lgbm_enet50",    dict(preproc_level=2, ml_model="LGBM",
+                                           feature_selection="elasticnet", n_features=50)),
+
+        # ── F: Optuna hyperparameter tuning (preproc=2, diffusive_mm) ────
+        ("F_preproc2_lgbm_tuned",     dict(preproc_level=2, ml_model="LGBM",
+                                           tune_hyperparams=True)),
+        ("F_preproc2_rf_tuned",       dict(preproc_level=2, ml_model="RF",
+                                           tune_hyperparams=True)),
+        ("F_preproc2_svm_tuned",      dict(preproc_level=2, ml_model="SVM",
+                                           tune_hyperparams=True)),
+
+        # ── G: THI severity threshold (preproc=2, LGBM, diffusive_mm) ───
+        ("G_thi25_preproc2_lgbm",     dict(preproc_level=2, ml_model="LGBM",
+                                           thi_threshold=25)),
+        ("G_thi36_preproc2_lgbm",     dict(preproc_level=2, ml_model="LGBM",
+                                           thi_threshold=36)),
+        ("G_thi56_preproc2_lgbm",     dict(preproc_level=2, ml_model="LGBM",
+                                           thi_threshold=56)),
+
+        # ── H: Individual modality Z-scores (preproc=2, LGBM, deviation) ─
+        ("H_preproc2_lgbm_power",     dict(preproc_level=2, ml_model="LGBM",
+                                           mode="power",    data_mode="deviation")),
+        ("H_preproc2_lgbm_aperiodic", dict(preproc_level=2, ml_model="LGBM",
+                                           mode="aperiodic",data_mode="deviation")),
+        ("H_preproc2_lgbm_regional",  dict(preproc_level=2, ml_model="LGBM",
+                                           mode="regional", data_mode="deviation")),
+        ("H_preproc2_lgbm_global",    dict(preproc_level=2, ml_model="LGBM",
+                                           mode="global",   data_mode="deviation")),
+        ("H_preproc2_lgbm_graph",     dict(preproc_level=2, ml_model="LGBM",
+                                           mode="graph",    data_mode="deviation")),
+
+        # ── I: Residual vs Deviation (comparison mode) ────────────────────
+        ("I_preproc2_lgbm_power_cmp", dict(preproc_level=2, ml_model="LGBM",
+                                           mode="power", data_mode="residual",
+                                           run_permutation=False, run_comparison=True)),
+
+        # ── J: Band-resolved diffusive × connectivity + tuning on best features ─
+        # PLI/PLV bands: connectivity measure × best feature representation
+        ("J_bands_pli_lgbm",       dict(preproc_level=2, ml_model="LGBM",
+                                        mode="diffusive_mm_bands", conn_mode="pli")),
+        ("J_bands_plv_lgbm",       dict(preproc_level=2, ml_model="LGBM",
+                                        mode="diffusive_mm_bands", conn_mode="plv")),
+        ("J_bands_pli_rf",         dict(preproc_level=2, ml_model="RF",
+                                        mode="diffusive_mm_bands", conn_mode="pli")),
+        # Optuna tuning on band-resolved features (F group only tuned averaged 68-feat)
+        ("J_bands_coh_lgbm_tuned", dict(preproc_level=2, ml_model="LGBM",
+                                        mode="diffusive_mm_bands",
+                                        tune_hyperparams=True)),
+        ("J_bands_pli_lgbm_tuned", dict(preproc_level=2, ml_model="LGBM",
+                                        mode="diffusive_mm_bands", conn_mode="pli",
+                                        tune_hyperparams=True)),
+    ][-5:]
+
+    if SCENARIOS_TO_RUN:
+        scenarios = [(l, o) for l, o in scenarios if l in SCENARIOS_TO_RUN]
+
+    print(f"Running {len(scenarios)} scenario(s).\n")
+
+    summary_rows = []
 
     for label, overrides in scenarios:
         kwargs = {**base_kwargs, **overrides}
-        run_mode = "permutation" if kwargs["run_permutation"] else "comparison"
+        run_mode = ("comparison" if kwargs["run_comparison"]
+                    else "permutation" if kwargs["run_permutation"]
+                    else "cv_only")
 
         print(f"\n{'='*60}")
-        print(f"Scenario: {label}")
+        print(f"Scenario: {label}  [{run_mode}]")
         print(f"{'='*60}")
 
-        res = classify(tinnorm_dir, **kwargs)
-        save_clf_result(res, clfs_dir / label, run_mode)
+        try:
+            res = classify(TINNORM_DIR, **kwargs)
+            save_clf_result(res, clfs_dir / label, run_mode, kwargs)
+
+            real_row = res.df_metric.iloc[0]
+            row = {"scenario": label, "run_mode": run_mode,
+                   "roc_auc": real_row.get("roc_auc"),
+                   "balanced_accuracy": real_row.get("balanced_accuracy"),
+                   "f1-score": real_row.get("f1-score")}
+            if res.per_fold_auc and isinstance(res.per_fold_auc, dict):
+                for site, auc in res.per_fold_auc.items():
+                    row[f"auc_{site}"] = auc
+            summary_rows.append(row)
+
+        except FileNotFoundError as e:
+            print(f"  SKIP — data not found: {e}")
+            summary_rows.append({"scenario": label, "run_mode": run_mode,
+                                  "roc_auc": "SKIP"})
+        except Exception as e:
+            print(f"  ERROR — {e}")
+            summary_rows.append({"scenario": label, "run_mode": run_mode,
+                                  "roc_auc": f"ERROR: {e}"})
+
+    # ── Ensemble: average predictions from top-N scenarios ───────────────
+    print(f"\n{'='*60}")
+    print("Ensemble of top scenarios …")
+    try:
+        ens_candidates = []
+        for label, _ in scenarios:
+            folder = clfs_dir / label
+            if not (folder / "y_prob.npy").exists() or not (folder / "y.npy").exists():
+                continue
+            mp = folder / "metrics.csv"
+            if not mp.exists():
+                continue
+            auc_val = pd.read_csv(mp).iloc[0].get("roc_auc")
+            if auc_val is not None:
+                try:
+                    ens_candidates.append((float(auc_val), label))
+                except (ValueError, TypeError):
+                    pass
+        ens_candidates.sort(reverse=True)
+
+        y_ref = None
+        for n_top in [3, 5, len(ens_candidates)]:
+            top_n = ens_candidates[:n_top]
+            if len(top_n) < 2:
+                continue
+            if y_ref is None:
+                y_ref = np.load(clfs_dir / top_n[0][1] / "y.npy",
+                                allow_pickle=True).astype(int)
+            probs = [np.load(clfs_dir / lbl / "y_prob.npy", allow_pickle=True)
+                     for _, lbl in top_n]
+            ens_prob = np.mean(probs, axis=0)
+            ens_auc  = roc_auc_score(y_ref, ens_prob)
+            y_pred_e = (ens_prob >= 0.5).astype(int)
+            from sklearn.metrics import balanced_accuracy_score as _ba
+            bal_acc  = _ba(y_ref, y_pred_e)
+
+            ens_label = f"ensemble_top{n_top}"
+            print(f"  {ens_label}: AUC={ens_auc:.4f}  BalAcc={bal_acc:.4f}")
+
+            ens_dir = clfs_dir / ens_label
+            ens_dir.mkdir(exist_ok=True)
+            np.save(ens_dir / "y.npy",      y_ref)
+            np.save(ens_dir / "y_prob.npy", ens_prob)
+            pd.DataFrame({
+                "model":             [ens_label],
+                "roc_auc":           [ens_auc],
+                "balanced_accuracy": [bal_acc],
+                "members":           [str([l for _, l in top_n])],
+            }).to_csv(ens_dir / "metrics.csv", index=False)
+
+            summary_rows.append({
+                "scenario": ens_label, "run_mode": "ensemble",
+                "roc_auc": ens_auc, "balanced_accuracy": bal_acc,
+            })
+    except Exception as e:
+        print(f"  Ensemble failed: {e}")
+
+    df_summary = pd.DataFrame(summary_rows)
+    summary_path = clfs_dir / "summary_all_scenarios.csv"
+    clfs_dir.mkdir(parents=True, exist_ok=True)
+    df_summary.to_csv(summary_path, index=False)
+    print(f"\n{'='*60}")
+    print(f"All done. Summary → {summary_path}")
+    cols = ["scenario", "roc_auc", "balanced_accuracy"]
+    print(df_summary[[c for c in cols if c in df_summary.columns]].to_string(index=False))
