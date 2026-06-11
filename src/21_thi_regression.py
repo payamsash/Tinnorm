@@ -51,10 +51,10 @@ except ImportError:
 
 TINNORM_DIR = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
 RESULTS_DIR = TINNORM_DIR / "results"
-FIGURES_DIR = RESULTS_DIR / "figures"
+FIGURES_DIR = RESULTS_DIR / "figures" / "21_thi_regression"
 TABLES_DIR  = RESULTS_DIR / "tables"
 
-CSV_PATH    = TINNORM_DIR / "diffusive_mm" / "source_preproc_2_coh.csv"
+CSV_PATH    = TINNORM_DIR / "diffusive_mm" / "source_preproc_2_pli.csv"
 MASTER_PATH = Path("../material/master_clean.csv")
 
 CTRL_COLOR   = "#1f77b4"
