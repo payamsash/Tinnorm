@@ -23,9 +23,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
+from lightgbm import LGBMClassifier
 from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.metrics import (
     roc_auc_score,
@@ -40,11 +38,11 @@ from sklearn.metrics import (
 
 TINNORM_DIR  = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
 RESULTS_DIR  = TINNORM_DIR / "results"
-FIGURES_DIR  = RESULTS_DIR / "figures"
+FIGURES_DIR  = RESULTS_DIR / "figures" / "17_preproc_comparison"
 TABLES_DIR   = RESULTS_DIR / "tables"
 
 SPACE        = "source"
-CONN_MODE    = "coh"
+CONN_MODE    = "pli"   # best-performing connectivity measure
 RANDOM_STATE = 42
 
 PREPROC_COLORS = {1: "#D6B4F0", 2: "#9B59B6", 3: "#4A235A"}
@@ -56,31 +54,96 @@ CHANCE_COLOR   = "#7f8c8d"
 # ── Data loading ──────────────────────────────────────────────────────────────
 
 def _load_diffusive(preproc_level: int, conn_mode: str = CONN_MODE):
+    """Load band-resolved Mahalanobis distance features from diffusive_mm output."""
     df_master = pd.read_csv("../material/master_clean.csv")
-    fname = TINNORM_DIR / "diffusive_mm" / f"{SPACE}_preproc_{preproc_level}_{conn_mode}.csv"
+    fname = TINNORM_DIR / "diffusive_mm" / f"{SPACE}_preproc_{preproc_level}_{conn_mode}_bands.csv"
     df = pd.read_csv(fname)
     df.rename(columns={"subject_ids": "subject_id"}, inplace=True)
+    df["subject_id"] = df["subject_id"].astype(str)
+    df_master["subject_id"] = df_master["subject_id"].astype(str)
     df = df.merge(df_master[["subject_id", "site"]], on="subject_id", how="left")
     df.rename(columns={"site": "SITE"}, inplace=True)
+    n_missing = df["SITE"].isna().sum()
+    if n_missing:
+        print(f"  Warning: {n_missing} subjects missing SITE — dropping them")
+        df = df.dropna(subset=["SITE"])
 
-    subject_ids = df["subject_id"].to_numpy()
-    sites       = df["SITE"].to_numpy()
-    y           = df["group"].to_numpy()
-    drop_cols   = ["group", "Unnamed: 0", "subject_id", "SITE",
-                   "age", "sex", "PTA4_mean", "PTA4_HF", "thi_score", "THI"]
+    y    = df["group"].to_numpy()
+    sites = df["SITE"].to_numpy()
+    sids  = df["subject_id"].to_numpy()
+    drop_cols = ["group", "subject_id", "SITE"]
     X = df.drop(columns=drop_cols, errors="ignore")
-    print(f"  Preproc {preproc_level}: {len(y)} subjects, {X.shape[1]} features")
-    return X, y, sites, subject_ids
+    print(f"  Preproc {preproc_level}: {len(y)} subjects, {X.shape[1]} features  "
+          f"(ctrl={int((y==0).sum())} tin={int((y==1).sum())})")
+    return X, y, sites, sids
+
+
+def _load_pli_z(preproc_level: int, conn_mode: str = CONN_MODE):
+    """
+    Load band-resolved regional PLI Z-scores for a given preprocessing level.
+
+    Uses unbiased Z-scores: LOSO for controls, full-model test set for tinnitus.
+    Power Z-scores are excluded from the preproc comparison because the BLR
+    normative model diverges on artifact-contaminated preproc_1/3 power spectra,
+    producing non-physiological Z-scores (|Z| >> 10) that trivially discriminate
+    groups without reflecting true neural deviations.
+    """
+    df_master = pd.read_csv("../material/master_clean.csv")
+    base = TINNORM_DIR / "models" / f"preproc_{preproc_level}" / SPACE / f"regional_{conn_mode}"
+
+    META = {"subject_id", "subject_ids", "observations", "SITE", "age", "sex",
+            "PTA4_mean", "PTA4_HF", "group"}
+
+    # Controls — LOSO (unbiased)
+    df_ctrl = pd.read_csv(base / "loso" / "loso_controls_Z.csv")
+    df_ctrl.rename(columns={"subject_id": "subject_ids"}, inplace=True)
+    df_ctrl["group"] = 0
+
+    # Tinnitus — full model
+    df_tin = pd.read_csv(base / "full_model" / "results" / "Z_test.csv")
+    if "observations" in df_tin.columns:
+        df_tin.drop(columns=["observations"], inplace=True)
+    df_tin["group"] = 1
+
+    df = pd.concat([df_ctrl, df_tin], axis=0, ignore_index=True)
+    df.rename(columns={"subject_ids": "subject_id"}, inplace=True)
+    df["subject_id"] = df["subject_id"].astype(str)
+
+    # Drop any existing SITE/site columns before re-merging from master
+    df.drop(columns=[c for c in df.columns if c.lower() in {"site", "age", "sex",
+                     "pta4_mean", "pta4_hf"}], inplace=True, errors="ignore")
+
+    df_master["subject_id"] = df_master["subject_id"].astype(str)
+    df = df.merge(df_master[["subject_id", "site"]], on="subject_id", how="left")
+    df.rename(columns={"site": "SITE"}, inplace=True)
+    n_missing = df["SITE"].isna().sum()
+    if n_missing:
+        print(f"  Warning: {n_missing} subjects missing SITE — dropping them")
+        df = df.dropna(subset=["SITE"])
+
+    # Clip extreme Z-scores (non-physiological artefacts from failed BLR fits)
+    feat_cols = [c for c in df.columns if c not in META | {"SITE"}]
+    df[feat_cols] = df[feat_cols].clip(-10, 10)
+
+    y    = df["group"].to_numpy()
+    sites = df["SITE"].to_numpy()
+    sids  = df["subject_id"].to_numpy()
+    X    = df[feat_cols].fillna(0)
+
+    print(f"  Preproc {preproc_level}: {len(y)} subjects, {X.shape[1]} features  "
+          f"(ctrl={int((y==0).sum())} tin={int((y==1).sum())})")
+    return X, y, sites, sids
 
 
 # ── Model ─────────────────────────────────────────────────────────────────────
 
 def _make_pipe():
-    clf = RandomForestClassifier(
-        n_estimators=300, min_samples_leaf=5,
-        class_weight="balanced", random_state=RANDOM_STATE, n_jobs=-1,
+    return LGBMClassifier(
+        n_estimators=500, learning_rate=0.05, num_leaves=31,
+        min_child_samples=20, subsample=0.8, colsample_bytree=0.8,
+        reg_lambda=1.0, class_weight="balanced",
+        random_state=RANDOM_STATE, n_jobs=-1, verbose=-1,
     )
-    return Pipeline([("scaler", StandardScaler()), ("clf", clf)])
 
 
 # ── LOSO CV ───────────────────────────────────────────────────────────────────
