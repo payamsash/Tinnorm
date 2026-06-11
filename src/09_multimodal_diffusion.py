@@ -55,8 +55,9 @@ def _load_z(model_dir: Path) -> pd.DataFrame:
 
 
 def _feature_cols(df: pd.DataFrame) -> list:
-    """Return columns that are EEG features (drop metadata)."""
-    drop = {"subject_ids", "observations", "Unnamed: 0", "group"}
+    """Return columns that are EEG features (drop metadata and clinical covariates)."""
+    drop = {"subject_ids", "subject_id", "observations", "Unnamed: 0", "group",
+            "age", "sex", "PTA4_mean", "PTA4_HF", "thi_score", "THI"}
     return [c for c in df.columns if c not in drop]
 
 
@@ -106,10 +107,22 @@ def compute_multimodal_diffusion(
         & set(df_regional[subject_col])
         & set(df_global[subject_col])
     )
-    df_power    = df_power[df_power[subject_col].isin(shared_ids)].sort_values(subject_col).reset_index(drop=True)
-    df_regional = df_regional[df_regional[subject_col].isin(shared_ids)].sort_values(subject_col).reset_index(drop=True)
-    df_global   = df_global[df_global[subject_col].isin(shared_ids)].sort_values(subject_col).reset_index(drop=True)
+    df_power    = (df_power[df_power[subject_col].isin(shared_ids)]
+                   .sort_values(subject_col).drop_duplicates(subset=subject_col, keep="first")
+                   .reset_index(drop=True))
+    df_regional = (df_regional[df_regional[subject_col].isin(shared_ids)]
+                   .sort_values(subject_col).drop_duplicates(subset=subject_col, keep="first")
+                   .reset_index(drop=True))
+    df_global   = (df_global[df_global[subject_col].isin(shared_ids)]
+                   .sort_values(subject_col).drop_duplicates(subset=subject_col, keep="first")
+                   .reset_index(drop=True))
 
+    n_dupes = (len(df_power[subject_col]) - df_power[subject_col].nunique())
+    if n_dupes:
+        print(f"  Warning: {n_dupes} duplicate subject_ids dropped (loso/test overlap — check source data).")
+
+    assert len(df_power) == len(df_regional) == len(df_global), \
+        f"Size mismatch after alignment: power={len(df_power)} regional={len(df_regional)} global={len(df_global)}"
     assert (df_power[subject_col].values == df_regional[subject_col].values).all(), \
         "Subject ID mismatch after alignment."
 
@@ -174,11 +187,20 @@ def compute_multimodal_diffusion(
     n_subj = len(df_power)
     n_pairs = len(shared_keys)
 
+    Z_CLIP = 10.0   # |Z| > 10 is non-physiological; clip to avoid numerical blow-up
+
     W = np.zeros((n_subj, n_pairs, 3))
     for idx, (roi, band) in enumerate(shared_keys):
         W[:, idx, 0] = df_power[pow_map[(roi, band)]].values
         W[:, idx, 1] = df_regional[reg_map[(roi, band)]].values
         W[:, idx, 2] = df_global[glo_map[(roi, band)]].values
+
+    # Clip non-physiological Z-scores before covariance estimation
+    n_clipped = (np.abs(W) > Z_CLIP).sum()
+    if n_clipped:
+        print(f"  Clipping {n_clipped} values with |Z| > {Z_CLIP} (numerical artefacts in normative model)")
+    W = np.clip(W, -Z_CLIP, Z_CLIP)
+    W = np.nan_to_num(W, nan=0.0, posinf=Z_CLIP, neginf=-Z_CLIP)
 
     # ── Estimate covariance on controls only ─────────────────────────────
     control_mask = group_col == 0
@@ -211,22 +233,34 @@ def compute_multimodal_diffusion(
     # ── Save ─────────────────────────────────────────────────────────────
     out_dir = tinnorm_dir / "diffusive_mm"
     os.makedirs(out_dir, exist_ok=True)
+
+    # Averaged across bands: 68 ROI features
     fname = out_dir / f"{space}_preproc_{preproc_level}_{conn_mode}.csv"
     df_md.to_csv(fname, index=False)
-    print(f"  Saved → {fname}")
+    print(f"  Saved (avg) → {fname}")
+
+    # Band-resolved: all ROI × band Mahalanobis distances (~680 features)
+    band_cols = [f"{roi}_{band}" for roi, band in shared_keys]
+    df_bands = pd.DataFrame(maha, columns=band_cols)
+    df_bands.insert(0, "group", group_col)
+    df_bands.insert(0, "subject_ids", df_power[subject_col].values)
+    fname_bands = out_dir / f"{space}_preproc_{preproc_level}_{conn_mode}_bands.csv"
+    df_bands.to_csv(fname_bands, index=False)
+    print(f"  Saved (bands) → {fname_bands}")
 
 
 if __name__ == "__main__":
 
     tinnorm_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
     space = "source"
-    preproc_levels = [1, 2, 3]
-    conn_modes = ["pli", "plv", "coh"]
+    preproc_levels = [1, 3]
+    conn_modes = ["pli", "plv", "coh"][:1]
 
     for preproc_level in preproc_levels:
         for conn_mode in conn_modes:
             out = tinnorm_dir / "diffusive_mm" / f"{space}_preproc_{preproc_level}_{conn_mode}.csv"
-            if out.exists():
+            out_bands = tinnorm_dir / "diffusive_mm" / f"{space}_preproc_{preproc_level}_{conn_mode}_bands.csv"
+            if out.exists() and out_bands.exists():
                 print(f"Already exists, skipping: {out.name}")
                 continue
             print(f"\npreproc_{preproc_level} | {conn_mode}")
