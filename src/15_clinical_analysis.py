@@ -49,13 +49,13 @@ except ImportError:
 
 TINNORM_DIR = Path("/Volumes/Extreme_SSD/payam_data/Tinnorm")
 RESULTS_DIR = TINNORM_DIR / "results"
-FIGURES_DIR = RESULTS_DIR / "figures"
+FIGURES_DIR = RESULTS_DIR / "figures" / "15_clinical"
 TABLES_DIR  = RESULTS_DIR / "tables"
 
 MODE      = "diffusive_mm"
 SPACE     = "source"
 PREPROC   = 2
-CONN_MODE = "coh"
+CONN_MODE = "pli"   # PLI is the top-performing connectivity measure
 
 CTRL_COLOR = "#1f77b4"
 TIN_COLOR  = "#C99700"
@@ -111,9 +111,9 @@ def _load_features():
     df.rename(columns={"site": "SITE"}, inplace=True)
     df.sort_values("subject_id", inplace=True)
 
-    # Drop columns not needed for feature correlation; keep "age" in the df
+    # Drop metadata; keep age, PTA4_mean, THI, TFI for downstream analyses
     df.drop(columns=["Unnamed: 0", "observations", "subject_id",
-                     "sex", "PTA4_mean", "thi_score"],
+                     "sex", "thi_score"],
             inplace=True, errors="ignore")
 
     print(f"  {len(df)} subjects  |  groups: {dict(df['group'].value_counts())}")
@@ -125,7 +125,7 @@ def _load_features():
 def _correlate_features(df: pd.DataFrame, target: str) -> pd.DataFrame:
     """Spearman r between each feature and `target`, FDR-corrected, tinnitus only."""
     df_tin = df[df["group"] == 1].dropna(subset=[target])
-    skip   = {"group", "SITE", "THI", "TFI", "PTA4_HF", "age"}
+    skip   = {"group", "SITE", "THI", "TFI", "PTA4_mean", "PTA4_HF", "age"}
     feat_cols = [c for c in df_tin.columns if c not in skip]
 
     rows = []
@@ -190,6 +190,132 @@ def plot_top_correlations(df: pd.DataFrame, res: pd.DataFrame, target: str,
         print(f"  Saved → {save_path}")
 
 
+# ── Per-site clinical profiles ────────────────────────────────────────────────
+
+def plot_site_clinical_profiles(df: pd.DataFrame, save_dir: Path = FIGURES_DIR):
+    """
+    Per-site violin plots of THI and (if available) TFI scores for tinnitus subjects,
+    and a stacked bar chart of group composition per site.
+    Saves: site_thi_distribution.pdf, site_composition.pdf
+    """
+    if "SITE" not in df.columns:
+        print("  No SITE column — skipping site profiles.")
+        return
+
+    sites = sorted(df["SITE"].dropna().unique())
+
+    # ── (a) THI distribution per site ────────────────────────────────────
+    score_cols = [c for c in ("THI", "TFI") if c in df.columns]
+    if score_cols:
+        df_tin = df[df["group"] == 1].copy()
+        n_panels = len(score_cols)
+        fig, axes = plt.subplots(1, n_panels,
+                                 figsize=(max(7, len(sites) * 0.9) * n_panels, 4.5),
+                                 constrained_layout=True, squeeze=False)
+        axes = axes[0]
+
+        for ax, score in zip(axes, score_cols):
+            data_plot = [df_tin[df_tin["SITE"] == s][score].dropna().values for s in sites]
+            vp = ax.violinplot(
+                [d for d in data_plot if len(d) >= 3],
+                positions=[i for i, d in enumerate(data_plot) if len(d) >= 3],
+                showmedians=True, showextrema=False, widths=0.6,
+            )
+            for body in vp["bodies"]:
+                body.set_facecolor(TIN_COLOR)
+                body.set_alpha(0.55)
+            vp["cmedians"].set_color("black")
+            vp["cmedians"].set_linewidth(1.8)
+
+            for i, d in enumerate(data_plot):
+                if len(d) < 3:
+                    continue
+                rng = np.random.default_rng(i)
+                jitter = rng.uniform(-0.08, 0.08, len(d))
+                ax.scatter(i + jitter, d, color=TIN_COLOR, alpha=0.35, s=8, zorder=3)
+
+            ax.set_xticks(range(len(sites)))
+            ax.set_xticklabels(sites, rotation=30, ha="right", fontsize=9)
+            ax.set_ylabel(score, fontsize=11)
+            ax.set_title(f"{score} distribution per site (tinnitus subjects)",
+                         style="italic", fontsize=10)
+            ax.spines[["right", "top"]].set_visible(False)
+
+        fpath = save_dir / "site_thi_distribution.pdf"
+        fig.savefig(fpath, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  Saved → {fpath}")
+
+    # ── (b) Group composition per site ───────────────────────────────────
+    comp = df.groupby(["SITE", "group"]).size().unstack(fill_value=0)
+    comp.columns = [("Control" if c == 0 else "Tinnitus") for c in comp.columns]
+    comp = comp.reindex(sites)
+    total = comp.sum(axis=1)
+
+    fig, ax = plt.subplots(figsize=(max(6, len(sites) * 1.0), 4.5), constrained_layout=True)
+    bottom = np.zeros(len(sites))
+    palette = {"Control": CTRL_COLOR, "Tinnitus": TIN_COLOR}
+    for col in ("Control", "Tinnitus"):
+        if col not in comp.columns:
+            continue
+        vals = comp[col].values.astype(float)
+        bars = ax.bar(sites, vals, bottom=bottom, color=palette[col],
+                      alpha=0.85, label=col, edgecolor="white", linewidth=0.5)
+        bottom += vals
+
+    for i, (site, tot) in enumerate(zip(sites, total)):
+        ax.text(i, tot + 1, str(int(tot)), ha="center", va="bottom", fontsize=8)
+
+    ax.set_ylabel("N subjects", fontsize=11)
+    ax.set_title("Group composition per site", style="italic", fontsize=11)
+    ax.legend(frameon=False, fontsize=10)
+    ax.tick_params(axis="x", rotation=30)
+    ax.spines[["right", "top"]].set_visible(False)
+
+    fpath = save_dir / "site_composition.pdf"
+    fig.savefig(fpath, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved → {fpath}")
+
+
+# ── PTA4 correlation ───────────────────────────────────────────────────────────
+
+def plot_pta_thi_scatter(df: pd.DataFrame, save_dir: Path = FIGURES_DIR):
+    """
+    Scatter of PTA4_mean vs THI for tinnitus subjects, coloured by age group,
+    with Spearman r. Saves: pta_thi_scatter.pdf
+    """
+    if "PTA4_mean" not in df.columns or "THI" not in df.columns:
+        print("  PTA4_mean or THI not available — skipping PTA scatter.")
+        return
+
+    df_tin = df[(df["group"] == 1)][["PTA4_mean", "THI"]].dropna()
+    if len(df_tin) < 10:
+        return
+
+    r, p = spearmanr(df_tin["PTA4_mean"], df_tin["THI"])
+    fig, ax = plt.subplots(figsize=(5.5, 4.5), constrained_layout=True)
+    sc = ax.scatter(df_tin["PTA4_mean"], df_tin["THI"],
+                    alpha=0.6, s=30, c=df_tin["THI"], cmap="YlOrRd", zorder=3)
+    plt.colorbar(sc, ax=ax, label="THI score", shrink=0.85)
+
+    m, b = np.polyfit(df_tin["PTA4_mean"].values, df_tin["THI"].values, 1)
+    x_ = np.linspace(df_tin["PTA4_mean"].min(), df_tin["PTA4_mean"].max(), 100)
+    ax.plot(x_, m * x_ + b, color="black", lw=1.5, linestyle="--", zorder=4)
+
+    ax.set_xlabel("PTA4 mean (dB HL)", fontsize=11)
+    ax.set_ylabel("THI score", fontsize=11)
+    ax.set_title(f"Audiometric severity vs tinnitus distress\n"
+                 f"Spearman r = {r:.3f},  p = {p:.3f}  (N={len(df_tin)})",
+                 style="italic", fontsize=10)
+    ax.spines[["right", "top"]].set_visible(False)
+
+    fpath = save_dir / "pta_thi_scatter.pdf"
+    fig.savefig(fpath, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved → {fpath}")
+
+
 # ── THI vs TFI agreement ──────────────────────────────────────────────────────
 
 def plot_thi_tfi_agreement(df: pd.DataFrame, save_dir: Path = FIGURES_DIR):
@@ -233,7 +359,7 @@ def plot_embedding(df: pd.DataFrame, save_dir: Path = FIGURES_DIR):
         print("  umap-learn not installed — skipping embedding.  pip install umap-learn")
         return
 
-    skip      = {"group", "SITE", "THI", "TFI", "PTA4_HF", "age"}
+    skip      = {"group", "SITE", "THI", "TFI", "PTA4_mean", "PTA4_HF", "age"}
     feat_cols = [c for c in df.columns if c not in skip]
     X = df[feat_cols].fillna(0).values
 
@@ -314,7 +440,7 @@ def plot_age_stratified(df: pd.DataFrame, save_dir: Path = FIGURES_DIR):
         return
 
     # Build feature score columns (all non-metadata columns)
-    skip = {"group", "SITE", "THI", "TFI", "PTA4_HF", "age"}
+    skip = {"group", "SITE", "THI", "TFI", "PTA4_mean", "PTA4_HF", "age"}
     feat_cols = [c for c in df.columns if c not in skip]
 
     if not feat_cols:
@@ -494,6 +620,14 @@ if __name__ == "__main__":
     # ── Age-stratified analysis ────────────────────────────────────────────
     print("\n── Age-stratified analysis ──")
     plot_age_stratified(df, FIGURES_DIR)
+
+    # ── Per-site clinical profiles ─────────────────────────────────────────
+    print("\n── Per-site clinical profiles ──")
+    plot_site_clinical_profiles(df, FIGURES_DIR)
+
+    # ── PTA4 vs THI correlation ────────────────────────────────────────────
+    print("\n── PTA4 vs THI scatter ──")
+    plot_pta_thi_scatter(df, FIGURES_DIR)
 
     print(f"\nAll outputs → {RESULTS_DIR}")
     print("Done.")
